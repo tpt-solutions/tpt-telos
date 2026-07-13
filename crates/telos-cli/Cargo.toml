@@ -13,4 +13,11 @@ path = "src/main.rs"
 telos-parser = { path = "../telos-parser" }
 telos-ir = { path = "../telos-ir" }
 telos-verifier = { path = "../telos-verifier" }
+telos-router = { path = "../telos-router" }
+telos-agent = { path = "../telos-agent" }
+telos-codegen = { path = "../telos-codegen" }
 clap = { version = "4", features = ["derive"] }
+
+[features]
+# Enables the `telos transpile --llm` / `build --llm` real LLM backend.
+llm = ["telos-agent/llm"]

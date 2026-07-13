@@ -174,12 +174,19 @@ impl Parser {
             }
         }
 
-        self.expect(Token::LBrace)?;
-        let mut body = Vec::new();
-        while *self.peek() != Token::RBrace {
-            body.push(self.parse_stmt()?);
-        }
-        self.expect(Token::RBrace)?;
+        // Body may be elided with `;` (intent-only) or given as `{ ... }`.
+        let (body, elided) = if *self.peek() == Token::Semicolon {
+            self.advance();
+            (Vec::new(), true)
+        } else {
+            self.expect(Token::LBrace)?;
+            let mut b = Vec::new();
+            while *self.peek() != Token::RBrace {
+                b.push(self.parse_stmt()?);
+            }
+            self.expect(Token::RBrace)?;
+            (b, false)
+        };
 
         Ok(Func {
             name,
@@ -187,6 +194,7 @@ impl Parser {
             requires,
             ensures,
             body,
+            elided,
         })
     }
 

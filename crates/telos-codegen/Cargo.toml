@@ -1,0 +1,10 @@
+[package]
+name = "telos-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+telos-parser = { path = "../telos-parser" }
+telos-agent = { path = "../telos-agent" }
+telos-router = { path = "../telos-router" }

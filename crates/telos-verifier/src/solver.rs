@@ -189,6 +189,288 @@ pub fn entails(premises: &[Constraint], concl: &Constraint) -> bool {
     true
 }
 
+// ---------------------------------------------------------------------------
+// Counter-example (model) extraction.
+//
+// When a conclusion is *not* entailed, we can construct a concrete witness: a
+// variable assignment that satisfies the premises together with the negation of
+// the conclusion. This witness is the "counter-example" fed back to the agentic
+// code generator during the Verify -> Counter-example -> Rewrite loop.
+// ---------------------------------------------------------------------------
+
+/// A model maps variable names to integer values that satisfy a given
+/// constraint set (when one exists).
+pub type Model = std::collections::HashMap<String, i64>;
+
+#[derive(Clone, Copy)]
+struct Frac {
+    num: i128,
+    den: i128, // always > 0
+}
+
+impl Frac {
+    fn new(num: i128, den: i128) -> Frac {
+        debug_assert!(den != 0);
+        let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
+        let g = gcd(num.unsigned_abs(), den as u128);
+        let g = g as i128;
+        if g == 0 {
+            Frac { num, den }
+        } else {
+            Frac {
+                num: num / g,
+                den: den / g,
+            }
+        }
+    }
+
+    /// Smallest integer >= self.
+    fn ceil(self) -> i128 {
+        let q = self.num.div_euclid(self.den);
+        let r = self.num.rem_euclid(self.den);
+        if r == 0 {
+            q
+        } else {
+            q + 1
+        }
+    }
+
+    /// Largest integer <= self.
+    fn floor(self) -> i128 {
+        self.num.div_euclid(self.den)
+    }
+}
+
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+fn eval(coeffs: &HashMap<String, i128>, model: &Model) -> i128 {
+    coeffs
+        .iter()
+        .map(|(v, c)| *c * model.get(v).copied().unwrap_or(0) as i128)
+        .sum()
+}
+
+/// Find a concrete integer model satisfying `cs`, if one exists.
+///
+/// Uses Fourier-Motzkin variable elimination and reconstructs an integer
+/// assignment from the derived bounds. Returns `None` if the system is
+/// unsatisfiable (over the reals, hence over the integers).
+pub fn model(cs: &[Constraint]) -> Option<Model> {
+    let ineqs = to_inequalities(cs);
+    solve_model(ineqs)
+}
+
+fn solve_model(ineqs: Vec<LinIneq>) -> Option<Model> {
+    // Collect variables.
+    let mut vars: Vec<String> = Vec::new();
+    for ineq in &ineqs {
+        for k in ineq.coeffs.keys() {
+            if !vars.contains(k) {
+                vars.push(k.clone());
+            }
+        }
+    }
+
+    if vars.is_empty() {
+        // Only constant inequalities remain; feasible iff every `c >= 0`.
+        for ineq in &ineqs {
+            if ineq.c < 0 {
+                return None;
+            }
+        }
+        return Some(Model::new());
+    }
+
+    let v = vars[0].clone();
+
+    let mut uppers: Vec<(i128, i128, HashMap<String, i128>)> = Vec::new();
+    let mut lowers: Vec<(i128, i128, HashMap<String, i128>)> = Vec::new();
+    let mut rest: Vec<LinIneq> = Vec::new();
+
+    for ineq in &ineqs {
+        match ineq.coeffs.get(&v) {
+            None => rest.push(ineq.clone()),
+            Some(&tv) => {
+                let others = remove_var(&ineq.coeffs, &v);
+                if tv > 0 {
+                    uppers.push((tv, ineq.c, others));
+                } else if tv < 0 {
+                    lowers.push((tv, ineq.c, others));
+                } else {
+                    rest.push(ineq.clone());
+                }
+            }
+        }
+    }
+
+    // Combine every upper (a*v <= c - rest) with every lower (b*v <= c2 - rest2), b < 0.
+    let mut new_ineqs = rest;
+    for (a, cu, uc) in &uppers {
+        for (b, c2, lc) in &lowers {
+            let mut coeffs = HashMap::new();
+            for k in merge_keys(uc, lc) {
+                let bi = *uc.get(&k).unwrap_or(&0);
+                let ei = *lc.get(&k).unwrap_or(&0);
+                // derived earlier: a*rest2 - b*rest_u <= a*c2 - b*c
+                let coeff = a * ei - b * bi;
+                if coeff != 0 {
+                    coeffs.insert(k, coeff);
+                }
+            }
+            let c = a * c2 - b * cu;
+            new_ineqs.push(LinIneq { coeffs, c });
+        }
+    }
+
+    let mut model = solve_model(new_ineqs)?;
+
+    // Recover a value for `v` from its (real) bounds.
+    let mut low: Option<Frac> = None;
+    for (b, c2, lc) in &lowers {
+        // b*v <= c2 - lc  with b < 0  =>  v >= (lc_val - c2)/(-b)
+        let lc_val = eval(lc, &model);
+        let num = lc_val - c2;
+        let den = -b; // > 0
+        let f = Frac::new(num, den);
+        low = Some(match low {
+            None => f,
+            Some(x) => {
+                if f.num * x.den >= x.num * f.den {
+                    f
+                } else {
+                    x
+                }
+            }
+        });
+    }
+
+    let mut high: Option<Frac> = None;
+    for (a, cu, uc) in &uppers {
+        // a*v <= cu - uc  with a > 0  =>  v <= (cu - uc_val)/a
+        let uc_val = eval(uc, &model);
+        let num = cu - uc_val;
+        let den = *a; // > 0
+        let f = Frac::new(num, den);
+        high = Some(match high {
+            None => f,
+            Some(x) => {
+                if f.num * x.den <= x.num * f.den {
+                    f
+                } else {
+                    x
+                }
+            }
+        });
+    }
+
+    let vval: i128 = match (low, high) {
+        (None, None) => 0,
+        (Some(l), None) => l.ceil(),
+        (None, Some(h)) => h.floor(),
+        (Some(l), Some(h)) => {
+            let lo = l.ceil();
+            let hi = h.floor();
+            if lo > hi {
+                return None;
+            }
+            lo
+        }
+    };
+
+    model.insert(v, vval as i64);
+    Some(model)
+}
+
+/// Produce a concrete counter-example (a witness model) showing that
+/// `conclusion` does *not* follow from `premises`. Returns `None` when the
+/// conclusion is actually entailed (no counter-example exists).
+pub fn counterexample(premises: &[Constraint], concl: &Constraint) -> Option<Model> {
+    for branch in negate(concl) {
+        let mut cs = premises.to_vec();
+        cs.extend(branch);
+        if let Some(m) = model(&cs) {
+            return Some(m);
+        }
+    }
+    None
+}
+
+/// Check whether an integer model satisfies every constraint in `cs`.
+/// Used to validate a generated counter-example before handing it to the agent.
+pub fn satisfies_model(cs: &[Constraint], model: &Model) -> bool {
+    let ineqs = to_inequalities(cs);
+    for ineq in &ineqs {
+        let lhs: i128 = ineq
+            .coeffs
+            .iter()
+            .map(|(v, c)| *c * model.get(v).copied().unwrap_or(0) as i128)
+            .sum();
+        if lhs > ineq.c {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use telos_ir::Linear;
+
+    fn c(terms: &[(&str, i64)], k: i64, rel: Relation) -> Constraint {
+        Constraint(
+            Linear {
+                terms: terms.iter().map(|(v, c)| (v.to_string(), *c)).collect(),
+                constant: k,
+            },
+            rel,
+        )
+    }
+
+    #[test]
+    fn model_finds_witness() {
+        // 1 <= x <= 3, y == x + 1
+        let cs = vec![
+            c(&[("x", 1)], -1, Relation::Ge),
+            c(&[("x", 1)], -3, Relation::Le),
+            c(&[("y", 1), ("x", -1)], -1, Relation::Eq),
+        ];
+        let m = model(&cs).expect("should be satisfiable");
+        assert!(satisfies_model(&cs, &m), "model {m:?} invalid");
+    }
+
+    #[test]
+    fn model_unsat_none() {
+        // x >= 1 && x <= 0
+        let cs = vec![c(&[("x", 1)], -1, Relation::Ge), c(&[("x", 1)], 0, Relation::Le)];
+        assert!(model(&cs).is_none());
+    }
+
+    #[test]
+    fn model_counterexample_for_postcondition() {
+        // premises: y' == y - 1 ; y >= 0
+        // conclusion (false): y' >= y
+        let pre = vec![
+            c(&[("y'", 1), ("y", -1)], 1, Relation::Eq),
+            c(&[("y", 1)], 0, Relation::Ge),
+        ];
+        let concl = c(&[("y'", 1), ("y", -1)], 0, Relation::Ge);
+        for branch in negate(&concl) {
+            let mut combined = pre.clone();
+            combined.extend(branch);
+            let m = model(&combined).expect("counterexample should exist");
+            assert!(satisfies_model(&combined, &m));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

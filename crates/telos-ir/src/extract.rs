@@ -222,10 +222,18 @@ fn pretty(expr: &Expr) -> String {
 /// Extract all verification problems from a parsed program.
 pub fn extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String> {
     let mut invariants: HashMap<String, &Invariant> = HashMap::new();
+    // Fields declared by each invariant-bearing type, derived from the bare
+    // variable names used in the invariant's constraints (e.g. `Wallet {
+    // balance >= 0 }` => field `balance`).
+    let mut invariant_fields: HashMap<String, HashSet<String>> = HashMap::new();
     for m in modules {
         for item in &m.items {
             if let Item::Invariant(inv) = item {
                 invariants.insert(inv.name.clone(), inv);
+                let entry = invariant_fields.entry(inv.name.clone()).or_default();
+                for c in &inv.constraints {
+                    collect_vars(c, entry);
+                }
             }
         }
     }
@@ -234,16 +242,34 @@ pub fn extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String> {
     for m in modules {
         for item in &m.items {
             if let Item::Func(f) = item {
-                problems.push(build_problem(f, &invariants)?);
+                problems.push(build_problem(f, &invariants, &invariant_fields)?);
             }
         }
     }
     Ok(problems)
 }
 
+/// Collect bare variable names referenced in an expression (used to discover an
+/// invariant-bearing type's fields).
+fn collect_vars(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::Var(v) => {
+            out.insert(v.clone());
+        }
+        Expr::Old(e) => collect_vars(e, out),
+        Expr::Unary { expr, .. } => collect_vars(expr, out),
+        Expr::Bin { lhs, rhs, .. } => {
+            collect_vars(lhs, out);
+            collect_vars(rhs, out);
+        }
+        _ => {}
+    }
+}
+
 fn build_problem(
     func: &Func,
     invariants: &HashMap<String, &Invariant>,
+    invariant_fields: &HashMap<String, HashSet<String>>,
 ) -> Result<VerificationProblem, String> {
     let var_fn = |name: &str| name.to_string();
     let pre_fn = |b: &str, f: &str| pre_field(b, f);
@@ -312,6 +338,18 @@ fn build_problem(
             }
         }
     }
+
+    // Fields of invariant-bearing parameters are also framed: a `&mut` parameter
+    // of a type with an invariant keeps its invariant unless explicitly mutated,
+    // even if the function body never reads or writes it.
+    for p in &func.params {
+        if let Some(fields) = invariant_fields.get(p.ty.name()) {
+            for f in fields {
+                referenced.insert((p.name.clone(), f.clone()));
+            }
+        }
+    }
+
     for (base, field) in &referenced {
         if !assigned.contains(&(base.clone(), field.clone())) {
             let post = Linear::var(&post_field(base, field));

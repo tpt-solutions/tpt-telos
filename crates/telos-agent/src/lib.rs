@@ -1,0 +1,313 @@
+//! The agentic transpiler core for tpt-telos (Phase 2).
+//!
+//! This crate implements the *Generate -> Verify -> Counter-example -> Rewrite*
+//! loop described in the design document:
+//!
+//! 1. An LLM-style [`CodeAgent`] produces a candidate implementation (a body of
+//!    `mutate state` / assignment statements) from a function's intent
+//!    (`requires` / `ensures` and `@boundary` routing).
+//! 2. The formal verifier checks the candidate against the mathematical
+//!    contract.
+//! 3. On failure, the solver extracts a concrete counter-example (a variable
+//!    assignment where the contract is violated).
+//! 4. The agent rewrites the candidate using that counter-example, and the loop
+//!    repeats until the contract is provably satisfied.
+//!
+//! The default [`StaticAgent`] is a fully offline, deterministic synthesizer:
+//! it translates the developer's stated body when present, and otherwise
+//! derives an implementation directly from the `ensures` clauses. Real LLM
+//! backends can be plugged in behind the [`CodeAgent`] trait (see
+//! [`llm_agent`] behind the `llm` feature).
+
+pub mod static_agent;
+
+#[cfg(feature = "llm")]
+pub mod llm_agent;
+
+pub use static_agent::StaticAgent;
+
+use telos_ir::{VerificationProblem, extract};
+use telos_parser::ast::*;
+use telos_verifier::{verify, counterexample, VerificationResult, Model};
+
+/// An owned view of a single function's verification intent, detached from the
+/// surrounding module so agents can be reasoned about in isolation.
+#[derive(Clone)]
+pub struct FuncSpec {
+    pub module_attrs: Vec<Attribute>,
+    pub func: Func,
+}
+
+impl FuncSpec {
+    pub fn new(module_attrs: Vec<Attribute>, func: Func) -> Self {
+        FuncSpec { module_attrs, func }
+    }
+}
+
+/// A candidate implementation produced by an agent: the statements that form
+/// the function body.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub stmts: Vec<Stmt>,
+}
+
+/// A code-generation agent. Implementations may be deterministic (offline) or
+/// backed by an external LLM; both speak the same structured `Stmt` language so
+/// the output is guaranteed to lower into compilable Rust/Go.
+pub trait CodeAgent {
+    /// Human-readable agent name (for logs).
+    fn name(&self) -> &str;
+
+    /// Produce an initial candidate implementation for `spec`.
+    fn generate(&self, spec: &FuncSpec) -> Result<Candidate, String>;
+
+    /// Rewrite a previous candidate using a concrete counter-example where the
+    /// contract failed. `ce` maps variable names (pre-state `"base.field"` and
+    /// post-state `"base.field'"`) to integer values.
+    fn rewrite(&self, spec: &FuncSpec, prev: &Candidate, ce: &Model) -> Result<Candidate, String>;
+}
+
+/// One iteration of the agentic loop, for transparent reporting.
+#[derive(Clone)]
+pub struct LoopStep {
+    pub iteration: usize,
+    pub action: String,
+    pub candidate: Candidate,
+    pub passed: bool,
+    pub counterexample: Option<Model>,
+}
+
+/// The full outcome of transpiling one function through the agentic loop.
+#[derive(Clone)]
+pub struct FuncOutcome {
+    pub func_name: String,
+    pub target: telos_router::Target,
+    pub agent: String,
+    pub iterations: Vec<LoopStep>,
+    pub final_candidate: Candidate,
+    pub problem: VerificationProblem,
+    pub result: VerificationResult,
+    pub verified: bool,
+}
+
+const MAX_ITERS: usize = 8;
+
+/// Build the verification problem for a candidate body by substituting it into
+/// the module (preserving the module's invariants and routing metadata).
+fn problem_for(module: &Module, func_idx: usize, stmts: &[Stmt]) -> VerificationProblem {
+    let mut module = module.clone();
+    module.items[func_idx] = match &module.items[func_idx] {
+        Item::Func(f) => {
+            let mut f = f.clone();
+            f.body = stmts.to_vec();
+            f.elided = false;
+            Item::Func(f)
+        }
+        other => other.clone(),
+    };
+    let problems = extract(&[module.clone()]).expect("re-extraction of a well-formed spec must succeed");
+    problems
+        .into_iter()
+        .find(|p| p.func_name == module.items[func_idx].func_name())
+        .expect("extracted problem for the transpiled function")
+}
+
+fn find_counterexample(problem: &VerificationProblem, result: &VerificationResult) -> Option<Model> {
+    for (concl, check) in problem.conclusions.iter().zip(result.checks.iter()) {
+        if !check.passed {
+            if let Some(m) = counterexample(&problem.premises, &concl.constraint) {
+                return Some(m);
+            }
+        }
+    }
+    None
+}
+
+/// Run the agentic transpilation loop for a single function.
+pub fn transpile_func(
+    module: &Module,
+    func_idx: usize,
+    agent: &dyn CodeAgent,
+) -> Result<FuncOutcome, String> {
+    let func = match &module.items[func_idx] {
+        Item::Func(f) => f.clone(),
+        _ => return Err("transpile_func requires a function item".into()),
+    };
+    let spec = FuncSpec::new(module.attributes.clone(), func.clone());
+    let target = telos_router::route(&module.attributes).target;
+
+    let mut candidate = if func.elided || func.body.is_empty() {
+        agent.generate(&spec)?
+    } else {
+        // Start from the developer's stated body; verify it before trusting it.
+        Candidate {
+            stmts: func.body.clone(),
+        }
+    };
+
+    let mut iterations = Vec::new();
+
+    for iter in 0..MAX_ITERS {
+        let problem = problem_for(module, func_idx, &candidate.stmts);
+        let result = verify(&problem);
+        let passed = result.all_passed;
+
+        iterations.push(LoopStep {
+            iteration: iter,
+            action: if iter == 0 {
+                "generate".to_string()
+            } else {
+                "rewrite".to_string()
+            },
+            candidate: candidate.clone(),
+            passed,
+            counterexample: if passed {
+                None
+            } else {
+                find_counterexample(&problem, &result)
+            },
+        });
+
+        if passed {
+            return Ok(FuncOutcome {
+                func_name: func.name.clone(),
+                target,
+                agent: agent.name().to_string(),
+                iterations,
+                final_candidate: candidate,
+                problem,
+                result,
+                verified: true,
+            });
+        }
+
+        let ce = find_counterexample(&problem, &result).unwrap_or_default();
+        let repaired = agent.rewrite(&spec, &candidate, &ce)?;
+        if repaired.stmts == candidate.stmts {
+            // Agent could not improve further; synthesize from the contract as a
+            // correct-by-construction fallback so the loop terminates.
+            let syn = static_agent::synthesize_from_ensures(&spec);
+            let syn_problem = problem_for(module, func_idx, &syn.stmts);
+            let syn_result = verify(&syn_problem);
+            iterations.push(LoopStep {
+                iteration: iter + 1,
+                action: "synthesize-from-ensures".to_string(),
+                candidate: syn.clone(),
+                passed: syn_result.all_passed,
+                counterexample: None,
+            });
+            return Ok(FuncOutcome {
+                func_name: func.name.clone(),
+                target,
+                agent: agent.name().to_string(),
+                iterations,
+                final_candidate: syn,
+                problem: syn_problem,
+                result: syn_result.clone(),
+                verified: syn_result.all_passed,
+            });
+        }
+        candidate = repaired;
+    }
+
+    // Loop exhausted without a proof; return the last candidate for diagnostics.
+    let problem = problem_for(module, func_idx, &candidate.stmts);
+    let result = verify(&problem);
+    Ok(FuncOutcome {
+        func_name: func.name.clone(),
+        target,
+        agent: agent.name().to_string(),
+        iterations,
+        final_candidate: candidate,
+        problem,
+        result,
+        verified: false,
+    })
+}
+
+/// Convenience: transpile every function in a module and collect outcomes.
+pub fn transpile_module(module: &Module, agent: &dyn CodeAgent) -> Result<Vec<FuncOutcome>, String> {
+    let mut out = Vec::new();
+    for (idx, item) in module.items.iter().enumerate() {
+        if let Item::Func(_) = item {
+            out.push(transpile_func(module, idx, agent)?);
+        }
+    }
+    Ok(out)
+}
+
+/// Convenience helper used by codegen: render a [`Candidate`] body back into
+/// source text via the parser's pretty-printer.
+pub fn render_candidate(c: &Candidate) -> String {
+    let mut s = String::new();
+    for stmt in &c.stmts {
+        s.push_str(&render_stmt(stmt));
+        s.push('\n');
+    }
+    s
+}
+
+fn render_stmt(s: &Stmt) -> String {
+    match s {
+        Stmt::MutateState(assigns) => {
+            let inner = assigns
+                .iter()
+                .map(render_assign)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("mutate state {{\n{}\n}}", indent(&inner))
+        }
+        Stmt::Assign(a) => render_assign(a),
+    }
+}
+
+fn render_assign(a: &Assign) -> String {
+    let op = match a.op {
+        AssignOp::Set => "=",
+        AssignOp::Add => "+=",
+        AssignOp::Sub => "-=",
+    };
+    format!("{} {} {};", pretty(&a.target), op, pretty(&a.value))
+}
+
+fn pretty(e: &Expr) -> String {
+    match e {
+        Expr::Int(n) => n.to_string(),
+        Expr::Var(v) => v.clone(),
+        Expr::Field { base, field } => format!("{}.{}", base, field),
+        Expr::Old(inner) => format!("old({})", pretty(inner)),
+        Expr::Unary { op, expr } => match op {
+            UnOp::Neg => format!("-{}", pretty(expr)),
+        },
+        Expr::Bin { op, lhs, rhs } => {
+            let s = match op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::Eq => "==",
+                BinOp::Ne => "!=",
+                BinOp::Lt => "<",
+                BinOp::Le => "<=",
+                BinOp::Gt => ">",
+                BinOp::Ge => ">=",
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+            };
+            format!("{} {} {}", pretty(lhs), s, pretty(rhs))
+        }
+    }
+}
+
+fn indent(s: &str) -> String {
+    s.lines()
+        .map(|line| {
+            if line.is_empty() {
+                line.to_string()
+            } else {
+                format!("    {}", line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}

@@ -51,6 +51,15 @@ pub enum Item {
     Func(Func),
 }
 
+impl Item {
+    pub fn func_name(&self) -> String {
+        match self {
+            Item::Func(f) => f.name.clone(),
+            Item::Invariant(i) => i.name.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invariant {
     pub name: String,
@@ -71,6 +80,9 @@ pub struct Func {
     pub requires: Vec<Expr>,
     pub ensures: Vec<Expr>,
     pub body: Vec<Stmt>,
+    /// True when the body was elided with `;` (intent-only). The agentic
+    /// synthesizer is responsible for providing an implementation.
+    pub elided: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
