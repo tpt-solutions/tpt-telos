@@ -1,0 +1,9 @@
+[package]
+name = "telos-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Intermediate representation and constraint extraction for tpt-telos"
+
+[dependencies]
+telos-parser = { path = "../telos-parser" }

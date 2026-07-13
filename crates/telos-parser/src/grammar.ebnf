@@ -1,0 +1,110 @@
+Formal Grammar for tpt-telos (v0.1.0)
+====================================
+
+Notation: EBNF. `{ ... }*` zero-or-more, `{ ... }+` one-or-more,
+`[ ... ]` optional, `( ... )` grouping. `//` introduces a comment.
+
+--------------------------------------------------------------------------------
+Program
+--------------------------------------------------------------------------------
+
+program        ::= module*
+
+module         ::= attribute* "module" IDENT "{" item* "}"
+
+attribute      ::= "@" IDENT [ "(" arglist? ")" ]
+
+arglist        ::= arg ( "," arg )*
+
+arg            ::= IDENT                      // flag, e.g. cpu_bound
+                 | IDENT "=" literal          // key/value, e.g. replication_factor = 3
+
+literal        ::= INT | IDENT
+
+--------------------------------------------------------------------------------
+Items
+--------------------------------------------------------------------------------
+
+item           ::= invariant
+                 | func
+
+invariant      ::= "invariant" IDENT "{"
+                       constraint ( ";" constraint )* ";"?
+                   "}"
+
+func           ::= "func" IDENT "(" params? ")"
+                       clause*
+                       block
+
+params         ::= param ( "," param )*
+
+param          ::= IDENT ":" type
+
+clause         ::= "requires" constraint
+                 | "ensures"  constraint
+
+block          ::= "{" stmt* "}"
+
+stmt           ::= "mutate" "state" "{" assign* "}"
+                 | assign
+
+assign         ::= target ( "=" | "+=" | "-=" ) expr ";"
+
+target         ::= expr        // must resolve to a field path, e.g. from.balance
+
+--------------------------------------------------------------------------------
+Types & Expressions
+--------------------------------------------------------------------------------
+
+type           ::= IDENT                // Wallet, PositiveInt, ...
+
+constraint     ::= expr                // a boolean expression (see below)
+
+expr           ::= orExpr
+
+orExpr         ::= andExpr ( "||" andExpr )*
+
+andExpr        ::= cmpExpr ( "&&" cmpExpr )*
+
+cmpExpr        ::= addExpr [ cmpOp addExpr ]      // single comparison
+
+cmpOp          ::= "==" | "!=" | "<" | "<=" | ">" | ">="
+
+addExpr        ::= mulExpr ( ( "+" | "-" ) mulExpr )*
+
+mulExpr        ::= unary ( ( "*" | "/" ) unary )*
+
+unary          ::= "-" unary
+                 | primary
+
+primary        ::= INT
+                 | "old" "(" expr ")"
+                 | IDENT [ "." IDENT ]           // var or field path
+                 | "(" expr ")"
+
+--------------------------------------------------------------------------------
+Lexical rules
+--------------------------------------------------------------------------------
+
+IDENT          ::= ( ASCII_LETTER | "_" ) ( ASCII_ALNUM | "_" )*
+INT            ::= [ "-" ] DIGIT+               // (lexer emits separate '-' token)
+COMMENT        ::= "//" ... end-of-line
+WS             ::= " " | "\t" | "\n" | "\r"
+
+--------------------------------------------------------------------------------
+Semantics (summary)
+--------------------------------------------------------------------------------
+
+* `@boundary(...)` and `@state(...)` are architectural metadata consumed by the
+  context router (Phase 2+). They are parsed but not verified in Phase 1.
+
+* `invariant T { c }` declares that constraint `c` must hold for every value of
+  type `T` -- at function entry (pre-state) and after every mutation (post-state).
+
+* `requires e` are pre-conditions: assumed true in the pre-state.
+* `ensures  e` are post-conditions: must be provable in the post-state given the
+  `requires` clauses and the `mutate state` assignments.
+
+* `old(e)` refers to the value of `e` in the pre-state.
+
+* No implicit type coercion and no hidden allocation: every operation is named.

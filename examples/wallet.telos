@@ -1,0 +1,19 @@
+@boundary(cpu_bound)
+module PaymentGateway {
+    // A wallet balance can never be negative.
+    invariant Wallet {
+        balance >= 0
+    }
+
+    // Move `amount` from one wallet to another.
+    func transfer(from: Wallet, to: Wallet, amount: PositiveInt)
+        requires from.balance >= amount
+        ensures from.balance == old(from.balance) - amount
+        ensures to.balance == old(to.balance) + amount
+    {
+        mutate state {
+            from.balance -= amount
+            to.balance += amount
+        }
+    }
+}

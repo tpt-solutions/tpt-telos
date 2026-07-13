@@ -1,10 +1,15 @@
 # tpt-telos TODO
 
 ## Phase 1: The Core & The Parser (Months 1-3)
-- [ ] Define the formal grammar for tpt-telos.
-- [ ] Build the Rust-based parser and AST generator.
-- [ ] Implement the basic constraint extraction (translating requires/ensures to Z3).
-- [ ] **Milestone:** A CLI that can parse a .telos file and output a formal verification pass/fail.
+- [x] Define the formal grammar for tpt-telos. (see `crates/telos-parser/src/grammar.ebnf`)
+- [x] Build the Rust-based parser and AST generator. (`crates/telos-parser`)
+- [x] Implement the basic constraint extraction (translating requires/ensures to a linear-arithmetic SMT core). (`crates/telos-ir`, `crates/telos-verifier`)
+- [x] **Milestone:** A CLI that can parse a .telos file and output a formal verification pass/fail. (`telos verify <file>`)
+
+> Phase 1 implemented: a Cargo workspace (`telos-parser`, `telos-ir`, `telos-verifier`, `telos-cli`)
+> with a hand-written lexer/parser, AST, constraint extraction to QF_LRA, and a self-contained
+> Fourier-Motzkin SMT-style verifier (sound over integers; no external Z3 dependency required to build).
+> Verified end-to-end against `examples/wallet.telos` (PASS) and `examples/broken.telos` (FAIL).
 
 ## Phase 2: The Agentic Transpiler (Months 4-6)
 - [ ] Integrate the LLM agent pipeline.
