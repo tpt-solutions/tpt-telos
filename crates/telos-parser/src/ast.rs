@@ -140,10 +140,16 @@ pub enum Expr {
     /// A bare identifier, e.g. `amount`.
     Var(String),
     /// A field access, e.g. `from.balance`.
-    Field { base: String, field: String },
+    Field {
+        base: String,
+        field: String,
+    },
     /// `old(expr)` -- the value of `expr` in the pre-state.
     Old(Box<Expr>),
-    Unary { op: UnOp, expr: Box<Expr> },
+    Unary {
+        op: UnOp,
+        expr: Box<Expr>,
+    },
     Bin {
         op: BinOp,
         lhs: Box<Expr>,

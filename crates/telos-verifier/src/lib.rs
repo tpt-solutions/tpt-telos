@@ -8,5 +8,5 @@
 pub mod solver;
 pub mod verify;
 
-pub use solver::{entails, unsat, model, satisfies_model, counterexample, Model};
-pub use verify::{verify, VerificationResult, CheckResult, is_unsat};
+pub use solver::{counterexample, entails, model, satisfies_model, unsat, Model};
+pub use verify::{is_unsat, verify, CheckResult, VerificationResult};

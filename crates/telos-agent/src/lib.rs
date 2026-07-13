@@ -26,9 +26,9 @@ pub mod llm_agent;
 
 pub use static_agent::StaticAgent;
 
-use telos_ir::{VerificationProblem, extract};
+use telos_ir::{extract, VerificationProblem};
 use telos_parser::ast::*;
-use telos_verifier::{verify, counterexample, VerificationResult, Model};
+use telos_verifier::{counterexample, verify, Model, VerificationResult};
 
 /// An owned view of a single function's verification intent, detached from the
 /// surrounding module so agents can be reasoned about in isolation.
@@ -105,14 +105,18 @@ fn problem_for(module: &Module, func_idx: usize, stmts: &[Stmt]) -> Verification
         }
         other => other.clone(),
     };
-    let problems = extract(&[module.clone()]).expect("re-extraction of a well-formed spec must succeed");
+    let problems =
+        extract(&[module.clone()]).expect("re-extraction of a well-formed spec must succeed");
     problems
         .into_iter()
         .find(|p| p.func_name == module.items[func_idx].func_name())
         .expect("extracted problem for the transpiled function")
 }
 
-fn find_counterexample(problem: &VerificationProblem, result: &VerificationResult) -> Option<Model> {
+fn find_counterexample(
+    problem: &VerificationProblem,
+    result: &VerificationResult,
+) -> Option<Model> {
     for (concl, check) in problem.conclusions.iter().zip(result.checks.iter()) {
         if !check.passed {
             if let Some(m) = counterexample(&problem.premises, &concl.constraint) {
@@ -226,7 +230,10 @@ pub fn transpile_func(
 }
 
 /// Convenience: transpile every function in a module and collect outcomes.
-pub fn transpile_module(module: &Module, agent: &dyn CodeAgent) -> Result<Vec<FuncOutcome>, String> {
+pub fn transpile_module(
+    module: &Module,
+    agent: &dyn CodeAgent,
+) -> Result<Vec<FuncOutcome>, String> {
     let mut out = Vec::new();
     for (idx, item) in module.items.iter().enumerate() {
         if let Item::Func(_) = item {

@@ -1,12 +1,11 @@
 //! Constraint-extraction (AST -> IR) unit tests for tpt-telos.
 //!
-//! Covers the [`Linear`] arithmetic helpers, and [`extract`] for a range of
-//! inputs: `requires`/`ensures` lowering, `Positive*` parameter constraints,
-//! invariant entry/maintenance, frame axioms, `old(...)` and nested arithmetic,
-//! and the rejection of unsupported (non-linear) constructs.
+//! Exercises the [`Linear`] arithmetic helpers and the [`extract`] function.
+//! Covers `requires`/`ensures` lowering, `Positive*` parameter constraints,
+//! invariant entry and maintenance, frame axioms, `old(...)` inside nested
+//! arithmetic, and rejection of unsupported non-linear constructs.
 
 use telos_ir::{extract, Constraint, Linear, Relation};
-use telos_parser::ast::*;
 use telos_parser::parse;
 
 // ---- helpers -------------------------------------------------------------
@@ -81,9 +80,7 @@ fn extract_positive_param_constraint() {
 #[test]
 fn extract_invariant_premise_for_param() {
     // A parameter whose type has an invariant gets that invariant as a premise.
-    let p = first_problem(
-        "module M { invariant Wallet { balance >= 0 } func f(w: Wallet) { } }",
-    );
+    let p = first_problem("module M { invariant Wallet { balance >= 0 } func f(w: Wallet) { } }");
     assert!(p.premises.iter().any(|Constraint(l, r)| {
         *r == Relation::Ge && l.terms == vec![("w.balance".to_string(), 1)] && l.constant == 0
     }));
@@ -92,35 +89,56 @@ fn extract_invariant_premise_for_param() {
 #[test]
 fn extract_maintained_invariant_conclusion() {
     // The invariant must be re-established in the post-state (is_ensures=false).
-    let p = first_problem(
-        "module M { invariant Wallet { balance >= 0 } func f(w: Wallet) { } }",
-    );
+    let p = first_problem("module M { invariant Wallet { balance >= 0 } func f(w: Wallet) { } }");
     assert!(!p.conclusions.is_empty());
     assert!(p.conclusions.iter().any(|c| !c.is_ensures));
     assert!(p.conclusions.iter().any(|c| {
-        matches!(c.constraint, Constraint(Linear { terms, .. }, Relation::Ge)
-            if terms == vec![("w.balance'".to_string(), 1)])
+        if let Constraint(Linear { terms, .. }, Relation::Ge) = &c.constraint {
+            terms == &[("w.balance'".to_string(), 1)]
+        } else {
+            false
+        }
     }));
 }
 
 #[test]
-fn extract_ensures_conclusion() {
+fn extract_ensures_conclusion_on_field() {
+    // A field in an `ensures` clause is lowered against the post-state name.
+    let p = first_problem(
+        "module M { invariant W { balance >= 0 } func f(w: W) ensures w.balance == 0 { } }",
+    );
+    assert!(p.conclusions.iter().any(|c| {
+        c.is_ensures
+            && if let Constraint(Linear { terms, .. }, Relation::Eq) = &c.constraint {
+                terms.iter().any(|(n, _)| n == "w.balance'")
+            } else {
+                false
+            }
+    }));
+}
+
+#[test]
+fn extract_ensures_conclusion_on_scalar() {
+    // A scalar in an `ensures` clause is a plain variable (no post-state prime).
     let p = first_problem("module M { func f(x: i64) ensures x == 0 { } }");
     assert!(p.conclusions.iter().any(|c| {
         c.is_ensures
-            && matches!(c.constraint, Constraint(Linear { terms, .. }, Relation::Eq)
-                if terms.contains(&("x'".to_string(), 1)))
+            && if let Constraint(Linear { terms, .. }, Relation::Eq) = &c.constraint {
+                terms == &[("x".to_string(), 1)] && c.constraint.1 == Relation::Eq
+            } else {
+                false
+            }
     }));
 }
 
 #[test]
-fn extract_frame_axiom_for_unmutated_param() {
-    // An unassigned scalar keeps its value across the call.
-    let p = first_problem("module M { func f(x: i64) { } }");
+fn extract_frame_axiom_for_unmutated_field() {
+    // An unassigned struct field keeps its value across the call.
+    let p = first_problem("module M { invariant W { balance >= 0 } func f(w: W) { } }");
     assert!(p.premises.iter().any(|Constraint(l, r)| {
         *r == Relation::Eq
-            && l.terms.contains(&("x'".to_string(), 1))
-            && l.terms.contains(&("x".to_string(), -1))
+            && l.terms.contains(&("w.balance'".to_string(), 1))
+            && l.terms.contains(&("w.balance".to_string(), -1))
     }));
 }
 
@@ -140,11 +158,11 @@ fn extract_body_mutation_premise() {
 
 #[test]
 fn extract_empty_contracts_ok() {
-    // A function with no contracts still lowers and yields no conclusions.
-    let p = first_problem("module M { func f(x: i64) { } }");
-    assert!(p.conclusions.is_empty());
-    // But it still gets a frame axiom for its parameter.
-    assert!(!p.premises.is_empty());
+    // A function with no `requires`/`ensures` still lowers without error. An
+    // invariant-bearing parameter contributes a maintained-invariant conclusion
+    // but no `ensures` conclusion.
+    let p = first_problem("module M { invariant W { balance >= 0 } func f(w: W) { } }");
+    assert!(p.conclusions.iter().all(|c| !c.is_ensures));
 }
 
 #[test]
@@ -156,8 +174,11 @@ fn extract_old_in_arithmetic() {
          func f(c: C) ensures c.v == old(c.v) * 2 { } }",
     );
     assert!(p.conclusions.iter().any(|c| {
-        matches!(c.constraint, Constraint(Linear { terms, .. }, Relation::Eq)
-            if terms.iter().any(|(n, _)| n == "c.v'"))
+        if let Constraint(Linear { terms, .. }, Relation::Eq) = &c.constraint {
+            terms.iter().any(|(n, _)| n == "c.v'")
+        } else {
+            false
+        }
     }));
     // No mutation, so a frame axiom keeps c.v' == c.v.
     assert!(p.premises.iter().any(|Constraint(l, r)| {

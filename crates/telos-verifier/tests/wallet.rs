@@ -1,5 +1,5 @@
-use telos_parser::parse;
 use telos_ir::extract;
+use telos_parser::parse;
 use telos_verifier::verify;
 
 #[test]
@@ -15,7 +15,10 @@ fn wallet_example_passes() {
         }
         println!("CONCLUSIONS:");
         for c in &p.conclusions {
-            println!("  [{}] {}  ->  {:?}", c.is_ensures, c.description, c.constraint);
+            println!(
+                "  [{}] {}  ->  {:?}",
+                c.is_ensures, c.description, c.constraint
+            );
         }
     }
     // ensure it still verifies

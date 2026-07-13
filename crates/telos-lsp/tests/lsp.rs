@@ -16,7 +16,10 @@ fn diagnostics_pass_for_verified_wallet() {
 fn diagnostics_flag_broken_contract_on_func_line() {
     let text = read("../../examples/broken.telos");
     let diags = analysis::diagnostics(&text);
-    assert!(!diags.is_empty(), "expected a diagnostic for broken contract");
+    assert!(
+        !diags.is_empty(),
+        "expected a diagnostic for broken contract"
+    );
     let d = &diags[0];
     assert_eq!(d.severity, analysis::SEVERITY_ERROR);
     // `func transfer(...)` is on line 8 (0-based 7).

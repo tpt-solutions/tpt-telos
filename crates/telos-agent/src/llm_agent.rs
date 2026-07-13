@@ -47,7 +47,10 @@ impl LlmAgent {
 
         let url_override = std::env::var("TELAS_LLM_URL").ok();
         let provider_name = std::env::var("TELAS_LLM_PROVIDER").ok().unwrap_or_else(|| {
-            if url_override.as_deref().is_some_and(|u| u.contains("anthropic.com")) {
+            if url_override
+                .as_deref()
+                .is_some_and(|u| u.contains("anthropic.com"))
+            {
                 "anthropic".to_string()
             } else {
                 "openai".to_string()
@@ -190,7 +193,10 @@ fn strip_code_fence(s: &str) -> String {
 /// parsed body. This reuses the existing Telos parser, keeping the LLM output in
 /// the same verified AST domain as the static agent.
 fn parse_body(body: &str) -> Result<Candidate, String> {
-    let wrapped = format!("module _T {{\n    func _f() {{\n        {}\n    }}\n}}\n", body);
+    let wrapped = format!(
+        "module _T {{\n    func _f() {{\n        {}\n    }}\n}}\n",
+        body
+    );
     let modules = telos_parser::parse(&wrapped)?;
     for m in &modules {
         for item in &m.items {
@@ -241,7 +247,10 @@ fn build_prompt(spec: &FuncSpec, ce: Option<&Model>) -> String {
     p.push_str("Given a function intent, produce ONLY a `mutate state { ... }` block ");
     p.push_str("whose assignments satisfy the `ensures` clauses. Use only field ");
     p.push_str("assignments of the form `base.field += expr` / `-=` / `=`.\n\n");
-    p.push_str(&format!("func {}({}) {{\n{}\n{}\n}}\n", f.name, params, requires, ensures));
+    p.push_str(&format!(
+        "func {}({}) {{\n{}\n{}\n}}\n",
+        f.name, params, requires, ensures
+    ));
     p.push_str(&format!("\n{}\n", body_hint));
 
     if let Some(ce) = ce {

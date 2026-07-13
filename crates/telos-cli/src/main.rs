@@ -15,7 +15,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::process::ExitCode;
 
-use telos_agent::{StaticAgent, transpile_module};
+use telos_agent::{transpile_module, StaticAgent};
 use telos_codegen::{generate_program, generate_project};
 use telos_parser::ast::*;
 use telos_parser::parse;
@@ -25,7 +25,11 @@ use telos_verifier::verify;
 use telos_agent::llm_agent::LlmAgent;
 
 #[derive(Parser)]
-#[command(name = "telos", version, about = "tpt-telos compiler frontend (Phase 4)")]
+#[command(
+    name = "telos",
+    version,
+    about = "tpt-telos compiler frontend (Phase 4)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -271,7 +275,12 @@ fn run_transpile(file: &str, llm: bool, out: Option<String>) -> Result<(), Strin
     for m in &modules {
         let funcs = transpile_module(m, agent.as_ref())?;
         for o in &funcs {
-            println!("  {} :: {}  [target: {}]", m.name, o.func_name, o.target.as_str());
+            println!(
+                "  {} :: {}  [target: {}]",
+                m.name,
+                o.func_name,
+                o.target.as_str()
+            );
             for step in &o.iterations {
                 let ce = step
                     .counterexample
@@ -515,7 +524,10 @@ fn run_eject(file: &str, out_dir: &str, only: Option<&str>, llm: bool) -> Result
     // always honored; here we additionally eject on demand from the CLI.
     let mut ejected: Vec<(String, String, String)> = Vec::new(); // (module, func, lang)
     for m in &mut modules {
-        let lang = telos_router::route(&m.attributes).target.as_str().to_string();
+        let lang = telos_router::route(&m.attributes)
+            .target
+            .as_str()
+            .to_string();
         for item in &mut m.items {
             if let Item::Func(f) = item {
                 let selected = only.map(|n| n == f.name).unwrap_or(true);
@@ -535,7 +547,8 @@ fn run_eject(file: &str, out_dir: &str, only: Option<&str>, llm: bool) -> Result
     if ejected.is_empty() {
         return Err(format!(
             "no matching function to eject{}",
-            only.map(|n| format!(" (looked for `{n}`)")).unwrap_or_default()
+            only.map(|n| format!(" (looked for `{n}`)"))
+                .unwrap_or_default()
         ));
     }
 
@@ -563,7 +576,10 @@ fn run_eject(file: &str, out_dir: &str, only: Option<&str>, llm: bool) -> Result
 
     println!("Ejected {} function(s) to {}/", ejected.len(), out_dir);
     for (module, func, lang) in &ejected {
-        println!("  {}::{} -> raw {} (opaque block + contract guard)", module, func, lang);
+        println!(
+            "  {}::{} -> raw {} (opaque block + contract guard)",
+            module, func, lang
+        );
     }
     for f in &project.files {
         println!("  {}", f.path);
@@ -688,7 +704,12 @@ fn render_assign(a: &Assign) -> String {
         AssignOp::Add => "+=",
         AssignOp::Sub => "-=",
     };
-    format!("{} {} {};", pretty_expr(&a.target), op, pretty_expr(&a.value))
+    format!(
+        "{} {} {};",
+        pretty_expr(&a.target),
+        op,
+        pretty_expr(&a.value)
+    )
 }
 
 fn render_type(t: &Type) -> String {

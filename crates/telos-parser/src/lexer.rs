@@ -16,21 +16,21 @@ pub enum Token {
     Colon,
     Dot,
     Semicolon,
-    Assign,        // =
-    PlusAssign,    // +=
-    MinusAssign,   // -=
+    Assign,      // =
+    PlusAssign,  // +=
+    MinusAssign, // -=
     Plus,
     Minus,
     Star,
     Slash,
-    EqEq,         // ==
-    Ne,           // !=
-    Lt,           // <
-    Le,           // <=
-    Gt,           // >
-    Ge,           // >=
-    And,          // &&
-    Or,           // ||
+    EqEq, // ==
+    Ne,   // !=
+    Lt,   // <
+    Le,   // <=
+    Gt,   // >
+    Ge,   // >=
+    And,  // &&
+    Or,   // ||
     KwModule,
     KwInvariant,
     KwFunc,

@@ -18,10 +18,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use telos_agent::FuncOutcome;
 use telos_parser::ast::*;
 
-pub mod go;
-pub mod ffi;
-pub mod project;
 pub mod eject;
+pub mod ffi;
+pub mod go;
+pub mod project;
 
 pub use project::{generate_project, GeneratedFile, Project};
 
@@ -87,7 +87,9 @@ pub(crate) fn analyze_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Func
         let ty = p.ty.name();
         let struct_fields = types.get(ty).cloned().unwrap_or_default();
         if struct_fields.is_empty() {
-            inputs.push(InputParam::Scalar { name: p.name.clone() });
+            inputs.push(InputParam::Scalar {
+                name: p.name.clone(),
+            });
         } else {
             inputs.push(InputParam::Struct {
                 name: p.name.clone(),
@@ -149,14 +151,15 @@ pub(crate) fn collect_types(module: &Module, types: &mut TypeFields) {
     let mut raw_fields: HashMap<String, BTreeSet<String>> = HashMap::new();
     let mut field_users: HashSet<String> = HashSet::new();
 
-    let scan_expr = |e: &Expr, users: &mut HashSet<String>, raw: &mut HashMap<String, BTreeSet<String>>| {
-        let mut fields: Vec<(String, String)> = Vec::new();
-        collect_fields(e, &mut fields);
-        for (base, field) in fields {
-            users.insert(base.clone());
-            raw.entry(base.clone()).or_default().insert(field);
-        }
-    };
+    let scan_expr =
+        |e: &Expr, users: &mut HashSet<String>, raw: &mut HashMap<String, BTreeSet<String>>| {
+            let mut fields: Vec<(String, String)> = Vec::new();
+            collect_fields(e, &mut fields);
+            for (base, field) in fields {
+                users.insert(base.clone());
+                raw.entry(base.clone()).or_default().insert(field);
+            }
+        };
 
     for item in &module.items {
         if let Item::Func(f) = item {
@@ -174,7 +177,10 @@ pub(crate) fn collect_types(module: &Module, types: &mut TypeFields) {
                 for a in assigns {
                     if let Expr::Field { base, field } = &a.target {
                         field_users.insert(base.clone());
-                        raw_fields.entry(base.clone()).or_default().insert(field.clone());
+                        raw_fields
+                            .entry(base.clone())
+                            .or_default()
+                            .insert(field.clone());
                     }
                     scan_expr(&a.value, &mut field_users, &mut raw_fields);
                 }
@@ -188,7 +194,10 @@ pub(crate) fn collect_types(module: &Module, types: &mut TypeFields) {
         if let Item::Func(f) = item {
             for p in &f.params {
                 if let Some(fields) = raw_fields.remove(&p.name) {
-                    types.entry(p.ty.name().to_string()).or_default().extend(fields);
+                    types
+                        .entry(p.ty.name().to_string())
+                        .or_default()
+                        .extend(fields);
                 }
             }
         }
@@ -305,7 +314,12 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
 
     let ret = if scalar_out.is_some() { " -> i64" } else { "" };
 
-    out.push_str(&format!("pub fn {}({}){} {{\n", f.name, params.join(", "), ret));
+    out.push_str(&format!(
+        "pub fn {}({}){} {{\n",
+        f.name,
+        params.join(", "),
+        ret
+    ));
 
     // Body.
     for stmt in stmts {
@@ -453,5 +467,335 @@ fn render_inv(e: &Expr) -> String {
             };
             format!("{} {} {}", render_inv(lhs), s, render_inv(rhs))
         }
+    }
+}
+
+// ===========================================================================
+// Unit tests for the individual codegen pieces (struct mutability, invariant
+// `impl` generation, doc-comment emission, the shared `analyze_func`, type
+// collection, and the eject hatch). These exercise the generators in isolation
+// from the full `generate_program` / `generate_project` pipeline tests in
+// `tests/gen.rs`.
+// ===========================================================================
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeSet, HashMap};
+
+    use telos_parser::ast::*;
+
+    use crate::{
+        analyze_func, collect_types, eject, generate_program, go, render_func, InputParam,
+        TypeFields,
+    };
+
+    fn t_var(v: &str) -> Expr {
+        Expr::Var(v.to_string())
+    }
+    fn t_int(n: i64) -> Expr {
+        Expr::Int(n)
+    }
+    fn t_field(base: &str, f: &str) -> Expr {
+        Expr::Field {
+            base: base.to_string(),
+            field: f.to_string(),
+        }
+    }
+    fn t_old(e: Expr) -> Expr {
+        Expr::Old(Box::new(e))
+    }
+    fn t_bin(op: BinOp, l: Expr, r: Expr) -> Expr {
+        Expr::Bin {
+            op,
+            lhs: Box::new(l),
+            rhs: Box::new(r),
+        }
+    }
+    fn t_assign(target: Expr, op: AssignOp, value: Expr) -> Assign {
+        Assign { target, op, value }
+    }
+    fn t_func(
+        name: &str,
+        params: Vec<Param>,
+        requires: Vec<Expr>,
+        ensures: Vec<Expr>,
+        body: Vec<Stmt>,
+    ) -> Func {
+        Func {
+            attributes: vec![],
+            name: name.to_string(),
+            params,
+            requires,
+            ensures,
+            body,
+            elided: false,
+        }
+    }
+
+    fn counter_types() -> TypeFields {
+        let mut m = HashMap::new();
+        m.insert("Counter".to_string(), BTreeSet::from(["v".to_string()]));
+        m
+    }
+
+    // ---- analyze_func ----
+
+    #[test]
+    fn analyze_scalar_param() {
+        let f = t_func(
+            "f",
+            vec![Param {
+                name: "x".into(),
+                ty: Type::Named("i64".into()),
+            }],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let a = analyze_func(&f, &f.body, &HashMap::new());
+        assert!(matches!(a.inputs[0], InputParam::Scalar { .. }));
+        assert!(a.scalar_out.is_none());
+    }
+
+    #[test]
+    fn analyze_struct_param_mutated_is_borrow_mut() {
+        let f = t_func(
+            "f",
+            vec![Param {
+                name: "c".into(),
+                ty: Type::Named("Counter".into()),
+            }],
+            vec![],
+            vec![],
+            vec![Stmt::MutateState(vec![t_assign(
+                t_field("c", "v"),
+                AssignOp::Set,
+                t_int(0),
+            )])],
+        );
+        let a = analyze_func(&f, &f.body, &counter_types());
+        match &a.inputs[0] {
+            InputParam::Struct { mutated, .. } => assert!(*mutated),
+            other => panic!("expected struct param, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn analyze_struct_param_unmutated_is_borrow_ref() {
+        let f = t_func(
+            "f",
+            vec![Param {
+                name: "c".into(),
+                ty: Type::Named("Counter".into()),
+            }],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let a = analyze_func(&f, &f.body, &counter_types());
+        match &a.inputs[0] {
+            InputParam::Struct { mutated, .. } => assert!(!*mutated),
+            other => panic!("expected struct param, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn analyze_scalar_return_value() {
+        // A bare assignment to a parameter-named variable becomes the scalar
+        // return; that parameter is then excluded from the inputs.
+        let f = t_func(
+            "f",
+            vec![
+                Param {
+                    name: "c".into(),
+                    ty: Type::Named("Counter".into()),
+                },
+                Param {
+                    name: "result".into(),
+                    ty: Type::Named("i64".into()),
+                },
+            ],
+            vec![],
+            vec![],
+            vec![Stmt::Assign(t_assign(
+                t_var("result"),
+                AssignOp::Set,
+                t_bin(BinOp::Add, t_field("c", "v"), t_int(1)),
+            ))],
+        );
+        let a = analyze_func(&f, &f.body, &counter_types());
+        // `result` is the return, so only `c` remains as an input.
+        assert_eq!(a.inputs.len(), 1);
+        assert_eq!(a.scalar_out.as_deref(), Some("result"));
+    }
+
+    // ---- render_func ----
+
+    #[test]
+    fn render_func_emits_contract_doc_comments() {
+        let f = t_func(
+            "transfer",
+            vec![Param {
+                name: "c".into(),
+                ty: Type::Named("Counter".into()),
+            }],
+            vec![t_bin(BinOp::Ge, t_field("c", "v"), t_int(0))],
+            vec![t_bin(
+                BinOp::Eq,
+                t_field("c", "v"),
+                t_bin(BinOp::Add, t_old(t_field("c", "v")), t_int(1)),
+            )],
+            vec![Stmt::MutateState(vec![t_assign(
+                t_field("c", "v"),
+                AssignOp::Set,
+                t_bin(BinOp::Add, t_field("c", "v"), t_int(1)),
+            )])],
+        );
+        let out = render_func(&f, &f.body, &counter_types());
+        assert!(out.contains("/// requires:"), "missing requires doc: {out}");
+        assert!(out.contains("/// ensures:"), "missing ensures doc: {out}");
+        // The `old(...)` must be preserved faithfully in the doc comment.
+        assert!(out.contains("old(c.v)"), "old() lost in doc: {out}");
+        // The mutated struct param is threaded as `&mut`.
+        assert!(
+            out.contains("c: &mut Counter"),
+            "expected &mut param: {out}"
+        );
+    }
+
+    #[test]
+    fn render_func_emits_scalar_return() {
+        let f = t_func(
+            "f",
+            vec![
+                Param {
+                    name: "c".into(),
+                    ty: Type::Named("Counter".into()),
+                },
+                Param {
+                    name: "result".into(),
+                    ty: Type::Named("i64".into()),
+                },
+            ],
+            vec![],
+            vec![],
+            vec![Stmt::Assign(t_assign(
+                t_var("result"),
+                AssignOp::Set,
+                t_bin(BinOp::Add, t_field("c", "v"), t_int(1)),
+            ))],
+        );
+        let out = render_func(&f, &f.body, &counter_types());
+        assert!(out.contains("-> i64"), "missing return type: {out}");
+        assert!(
+            out.contains("let result ="),
+            "missing return binding: {out}"
+        );
+        // The trailing bare expression returns the scalar.
+        assert!(
+            out.lines().any(|l| l.trim() == "result"),
+            "missing return expression: {out}"
+        );
+    }
+
+    // ---- collect_types ----
+
+    #[test]
+    fn collect_types_gathers_struct_fields() {
+        let module = Module {
+            attributes: vec![],
+            name: "M".into(),
+            items: vec![Item::Func(t_func(
+                "f",
+                vec![Param {
+                    name: "c".into(),
+                    ty: Type::Named("Counter".into()),
+                }],
+                vec![t_bin(BinOp::Ge, t_field("c", "v"), t_int(0))],
+                vec![],
+                vec![Stmt::MutateState(vec![t_assign(
+                    t_field("c", "v"),
+                    AssignOp::Set,
+                    t_int(0),
+                )])],
+            ))],
+        };
+        let mut types = HashMap::new();
+        collect_types(&module, &mut types);
+        assert_eq!(types.get("Counter").map(|s| s.len()), Some(1));
+        assert!(types.get("Counter").unwrap().contains("v"));
+    }
+
+    // ---- go::exported ----
+
+    #[test]
+    fn go_exported_capitalises() {
+        assert_eq!(go::exported("enqueue"), "Enqueue");
+        assert_eq!(go::exported("pending"), "Pending");
+        assert_eq!(go::exported("Queue"), "Queue");
+    }
+
+    // ---- eject hatch ----
+
+    #[test]
+    fn eject_renders_opaque_block_and_guard() {
+        let mut f = t_func(
+            "withdraw",
+            vec![Param {
+                name: "b".into(),
+                ty: Type::Named("Balance".into()),
+            }],
+            vec![t_bin(BinOp::Ge, t_field("b", "amount"), t_int(0))],
+            vec![t_bin(
+                BinOp::Eq,
+                t_field("b", "amount"),
+                t_bin(BinOp::Sub, t_old(t_field("b", "amount")), t_int(1)),
+            )],
+            vec![Stmt::MutateState(vec![t_assign(
+                t_field("b", "amount"),
+                AssignOp::Set,
+                t_int(0),
+            )])],
+        );
+        f.attributes.push(Attribute {
+            name: "eject".into(),
+            args: vec![Arg::Flag("rust".into())],
+        });
+
+        let mut types = HashMap::new();
+        types.insert(
+            "Balance".to_string(),
+            BTreeSet::from(["amount".to_string()]),
+        );
+        let out = eject::render_rust_ejected(&f, &f.body, &types);
+
+        // The trusted opaque block and the generated guard are both present.
+        assert!(
+            out.contains("fn withdraw_impl"),
+            "missing opaque block: {out}"
+        );
+        assert!(out.contains("pub fn withdraw"), "missing guard: {out}");
+        // The guard enforces the contracts with runtime assertions.
+        assert!(out.contains("assert!("), "missing contract guard: {out}");
+        // `old(...)` is captured into a snapshot local in the guard.
+        assert!(
+            out.contains("__old_b_amount"),
+            "missing old snapshot: {out}"
+        );
+    }
+
+    // ---- generate_program (structural) ----
+
+    #[test]
+    fn generate_program_emits_struct_and_invariant_method() {
+        // The struct fields come from the function's field accesses (the
+        // invariant alone does not populate the struct type).
+        let src =
+            "module M { invariant Counter { v >= 0 } func f(c: Counter) requires c.v >= 0 { } }";
+        let modules = telos_parser::parse(src).unwrap();
+        let rust = generate_program(&modules, &[]);
+        assert!(rust.contains("pub struct Counter"));
+        assert!(rust.contains("pub fn satisfies_invariants"));
+        assert!(rust.contains("pub fn f"));
     }
 }

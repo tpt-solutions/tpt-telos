@@ -1,7 +1,7 @@
 //! Recursive-descent parser for tpt-telos, building the AST.
 
 use crate::ast::*;
-use crate::lexer::{Token, lex};
+use crate::lexer::{lex, Token};
 
 pub struct Parser {
     tokens: Vec<(Token, usize, usize)>,
@@ -95,7 +95,12 @@ impl Parser {
                                 self.advance();
                                 Literal::Ident(s)
                             }
-                            other => return Err(format!("expected literal in attribute, found {}", other)),
+                            other => {
+                                return Err(format!(
+                                    "expected literal in attribute, found {}",
+                                    other
+                                ))
+                            }
                         };
                         args.push(Arg::Kv(key, lit));
                     } else {

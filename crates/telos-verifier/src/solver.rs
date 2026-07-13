@@ -9,8 +9,8 @@
 //!
 //! Elimination uses Fourier-Motzkin variable elimination.
 
-use telos_ir::{Constraint, Relation};
 use std::collections::HashMap;
+use telos_ir::{Constraint, Relation};
 
 #[derive(Clone, Debug)]
 struct LinIneq {
@@ -449,7 +449,10 @@ mod model_tests {
     #[test]
     fn model_unsat_none() {
         // x >= 1 && x <= 0
-        let cs = vec![c(&[("x", 1)], -1, Relation::Ge), c(&[("x", 1)], 0, Relation::Le)];
+        let cs = vec![
+            c(&[("x", 1)], -1, Relation::Ge),
+            c(&[("x", 1)], 0, Relation::Le),
+        ];
         assert!(model(&cs).is_none());
     }
 
@@ -489,14 +492,20 @@ mod tests {
     #[test]
     fn unsat_obvious() {
         // x <= 0 && x >= 1
-        let cs = vec![c(&[("x", 1)], 0, Relation::Le), c(&[("x", 1)], -1, Relation::Ge)];
+        let cs = vec![
+            c(&[("x", 1)], 0, Relation::Le),
+            c(&[("x", 1)], -1, Relation::Ge),
+        ];
         assert!(unsat(&cs));
     }
 
     #[test]
     fn sat_consistent_bounds() {
         // 0 <= x <= 5
-        let cs = vec![c(&[("x", 1)], 0, Relation::Ge), c(&[("x", 1)], -5, Relation::Le)];
+        let cs = vec![
+            c(&[("x", 1)], 0, Relation::Ge),
+            c(&[("x", 1)], -5, Relation::Le),
+        ];
         assert!(!unsat(&cs));
     }
 
@@ -525,5 +534,156 @@ mod tests {
         ];
         let concl = c(&[("y", 1)], -1, Relation::Ge);
         assert!(entails(&pre, &concl));
+    }
+}
+
+#[cfg(test)]
+mod extended_tests {
+    use super::*;
+    use telos_ir::Linear;
+
+    fn c(terms: &[(&str, i64)], k: i64, rel: Relation) -> Constraint {
+        Constraint(
+            Linear {
+                terms: terms.iter().map(|(v, c)| (v.to_string(), *c)).collect(),
+                constant: k,
+            },
+            rel,
+        )
+    }
+
+    #[test]
+    fn unsat_three_variables() {
+        // x >= 1 && x <= 0  (impossible regardless of y, z)
+        let cs = vec![
+            c(&[("x", 1)], -1, Relation::Ge),
+            c(&[("x", 1)], 0, Relation::Le),
+        ];
+        assert!(unsat(&cs));
+    }
+
+    #[test]
+    fn unsat_with_mixed_relations() {
+        // x <= 0 && x >= 2 && y == x + 1
+        let cs = vec![
+            c(&[("x", 1)], 0, Relation::Le),
+            c(&[("x", 1)], -2, Relation::Ge),
+            c(&[("y", 1), ("x", -1)], -1, Relation::Eq),
+        ];
+        assert!(unsat(&cs));
+    }
+
+    #[test]
+    fn sat_three_variable_bounds() {
+        // 0 <= x <= 5, 0 <= y <= 3, z == x + y  (feasible)
+        let cs = vec![
+            c(&[("x", 1)], 0, Relation::Ge),
+            c(&[("x", 1)], -5, Relation::Le),
+            c(&[("y", 1)], 0, Relation::Ge),
+            c(&[("y", 1)], -3, Relation::Le),
+            c(&[("z", 1), ("x", -1), ("y", -1)], 0, Relation::Eq),
+        ];
+        assert!(!unsat(&cs));
+    }
+
+    #[test]
+    fn entails_with_neq_conclusion() {
+        // premises: x >= 1  does NOT entail x != 0  (x == 1 satisfies x>=1 and x!=0;
+        // but x could also be 1, which is != 0, so conclusion holds? No: we must
+        // prove it for ALL x>=1. x>=1 implies x!=0, so it IS entailed.)
+        let pre = vec![c(&[("x", 1)], -1, Relation::Ge)];
+        let concl = c(&[("x", 1)], 0, Relation::Ne);
+        assert!(entails(&pre, &concl));
+    }
+
+    #[test]
+    fn entails_neq_negative() {
+        // premises: x >= 0  does NOT entail x != 1  (x == 1 breaks it)
+        let pre = vec![c(&[("x", 1)], 0, Relation::Ge)];
+        let concl = c(&[("x", 1)], -1, Relation::Ne);
+        assert!(!entails(&pre, &concl));
+    }
+
+    #[test]
+    fn counterexample_finds_witness_for_failed_postcondition() {
+        // premises: y' == y - 1 ; y >= 0
+        // conclusion (false): y' >= y
+        let pre = vec![
+            c(&[("y'", 1), ("y", -1)], 1, Relation::Eq),
+            c(&[("y", 1)], 0, Relation::Ge),
+        ];
+        let concl = c(&[("y'", 1), ("y", -1)], 0, Relation::Ge);
+        let ce = counterexample(&pre, &concl).expect("a counter-example must exist");
+        // The witness must satisfy the premises together with the negated
+        // conclusion (y' < y, i.e. y' - y + 1 <= 0).
+        let negated = vec![c(&[("y'", 1), ("y", -1)], 1, Relation::Le)];
+        let mut combined = pre.clone();
+        combined.extend(negated);
+        assert!(
+            satisfies_model(&combined, &ce),
+            "counter-example {ce:?} invalid"
+        );
+    }
+
+    #[test]
+    fn counterexample_none_when_entailed() {
+        // premises: y' == y - 1 ; y >= 0  =>  y' <= y  (entailed, no CE)
+        let pre = vec![
+            c(&[("y'", 1), ("y", -1)], 1, Relation::Eq),
+            c(&[("y", 1)], 0, Relation::Ge),
+        ];
+        let concl = c(&[("y'", 1), ("y", -1)], 0, Relation::Le);
+        assert!(counterexample(&pre, &concl).is_none());
+    }
+
+    #[test]
+    fn model_solves_linear_division() {
+        // 2 * x == 4  =>  x == 2
+        let cs = vec![c(&[("x", 2)], -4, Relation::Eq)];
+        let m = model(&cs).expect("should be satisfiable");
+        assert_eq!(m.get("x").copied().unwrap_or(0), 2);
+        assert!(satisfies_model(&cs, &m));
+    }
+
+    #[test]
+    fn integer_overflow_edge_bounds() {
+        // Bounds at the i64 extremes are handled (the solver works in i128).
+        let max = i64::MAX;
+        // x >= i64::MAX && x <= i64::MAX - 1  =>  unsat
+        let cs = vec![
+            c(&[("x", 1)], -max, Relation::Ge),
+            c(&[("x", 1)], -(max - 1), Relation::Le),
+        ];
+        assert!(unsat(&cs));
+        // x <= i64::MAX  =>  sat  (the lower extreme is trivially true for i64)
+        let sat = vec![c(&[("x", 1)], -max, Relation::Le)];
+        assert!(!unsat(&sat));
+    }
+
+    #[test]
+    fn entails_across_i64_extremes() {
+        // x == i64::MAX  =>  x >= i64::MAX
+        let max = i64::MAX;
+        let pre = vec![c(&[("x", 1)], -max, Relation::Eq)];
+        let concl = c(&[("x", 1)], -max, Relation::Ge);
+        assert!(entails(&pre, &concl));
+        // but x == i64::MAX  does NOT entail  x >= 0  is... actually it does
+        // (MAX >= 0). Instead show it does NOT entail x <= 0.
+        let concl2 = c(&[("x", 1)], 0, Relation::Le);
+        assert!(!entails(&pre, &concl2));
+    }
+
+    #[test]
+    fn model_respects_all_relations() {
+        // Independent integer bounds on two variables; any corner satisfies all.
+        let cs = vec![
+            c(&[("x", 1)], -1, Relation::Ge),
+            c(&[("x", 1)], -3, Relation::Le),
+            c(&[("y", 1)], -2, Relation::Ge),
+            c(&[("y", 1)], -4, Relation::Le),
+            c(&[("x", 1), ("y", 1)], -100, Relation::Le),
+        ];
+        let m = model(&cs).expect("should be satisfiable");
+        assert!(satisfies_model(&cs, &m), "model {m:?} invalid");
     }
 }

@@ -21,7 +21,9 @@ use std::collections::HashMap;
 
 use telos_parser::ast::*;
 
-use crate::{analyze_func, collect_types, render_expr_doc, render_params_sig, InputParam, TypeFields};
+use crate::{
+    analyze_func, collect_types, render_expr_doc, render_params_sig, InputParam, TypeFields,
+};
 
 /// Capitalise the first character (ASCII) so a telos field/func name becomes an
 /// exported Go identifier.
@@ -125,7 +127,10 @@ fn generate_module(
     // Functions.
     for item in &module.items {
         if let Item::Func(f) = item {
-            let stmts = bodies.get(&f.name).cloned().unwrap_or_else(|| f.body.clone());
+            let stmts = bodies
+                .get(&f.name)
+                .cloned()
+                .unwrap_or_else(|| f.body.clone());
             if f.is_ejected() {
                 out.push_str(&crate::eject::render_go_ejected(f, &stmts, types));
             } else {
@@ -153,7 +158,12 @@ pub(crate) fn render_func_named(
     let mut out = String::new();
 
     // Doc-comment carrying the contract (telos-level names for fidelity).
-    out.push_str(&format!("// {} implements {}({})\n", name, f.name, render_params_sig(f)));
+    out.push_str(&format!(
+        "// {} implements {}({})\n",
+        name,
+        f.name,
+        render_params_sig(f)
+    ));
     for r in &f.requires {
         out.push_str(&format!("// requires: {}\n", render_expr_doc(r)));
     }

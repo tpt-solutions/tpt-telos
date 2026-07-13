@@ -63,15 +63,9 @@ impl CodeAgent for StaticAgent {
             {
                 if let Expr::Field { base, field } = &**lhs {
                     let expected = eval_post(rhs, ce);
-                    let actual = ce
-                        .get(&post_name(base, field))
-                        .copied()
-                        .unwrap_or(i64::MIN);
+                    let actual = ce.get(&post_name(base, field)).copied().unwrap_or(i64::MIN);
                     if expected != actual {
-                        fixes.insert(
-                            (base.clone(), field.clone()),
-                            resolve_old(rhs),
-                        );
+                        fixes.insert((base.clone(), field.clone()), resolve_old(rhs));
                     }
                 }
             }

@@ -75,13 +75,22 @@ impl Server {
                 vec![]
             }
             "textDocument/didOpen" => {
-                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                let text = msg["params"]["textDocument"]["text"].as_str().unwrap_or("").to_string();
+                let uri = msg["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let text = msg["params"]["textDocument"]["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
                 self.documents.insert(uri.clone(), text);
                 vec![self.publish(&uri)]
             }
             "textDocument/didChange" => {
-                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                let uri = msg["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
                 if let Some(changes) = msg["params"]["contentChanges"].as_array() {
                     if let Some(last) = changes.last() {
                         if let Some(text) = last["text"].as_str() {
@@ -92,11 +101,17 @@ impl Server {
                 vec![self.publish(&uri)]
             }
             "textDocument/didSave" => {
-                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                let uri = msg["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
                 vec![self.publish(&uri)]
             }
             "textDocument/didClose" => {
-                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                let uri = msg["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
                 self.documents.remove(&uri);
                 vec![publish_diagnostics(&uri, &[])]
             }
@@ -134,7 +149,11 @@ impl Server {
             }
             _ => {
                 if id.is_some() {
-                    vec![error_response(id, -32601, &format!("method not found: {method}"))]
+                    vec![error_response(
+                        id,
+                        -32601,
+                        &format!("method not found: {method}"),
+                    )]
                 } else {
                     vec![]
                 }
@@ -187,7 +206,10 @@ fn eject_preview(text: &str, func: Option<&str>) -> Result<String, String> {
 
     let mut matched = false;
     for m in &mut modules {
-        let lang = telos_router::route(&m.attributes).target.as_str().to_string();
+        let lang = telos_router::route(&m.attributes)
+            .target
+            .as_str()
+            .to_string();
         for item in &mut m.items {
             if let Item::Func(f) = item {
                 let selected = func.map(|n| n == f.name).unwrap_or(true);

@@ -161,7 +161,12 @@ fn assign_constraint(
 ) -> Result<Constraint, String> {
     let (base, field) = match &a.target {
         Expr::Field { base, field } => (base.clone(), field.clone()),
-        other => return Err(format!("assignment target must be a field, found {:?}", other)),
+        other => {
+            return Err(format!(
+                "assignment target must be a field, found {:?}",
+                other
+            ))
+        }
     };
     let post = Linear::var(&post_field(&base, &field));
     let pre = Linear::var(&pre_field(&base, &field));

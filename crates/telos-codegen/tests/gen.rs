@@ -1,8 +1,13 @@
-use telos_agent::{StaticAgent, transpile_module};
+use telos_agent::{transpile_module, StaticAgent};
 use telos_codegen::{generate_program, generate_project};
 use telos_parser::parse;
 
-fn outcomes_for(src: &str) -> (Vec<telos_parser::ast::Module>, Vec<telos_agent::FuncOutcome>) {
+fn outcomes_for(
+    src: &str,
+) -> (
+    Vec<telos_parser::ast::Module>,
+    Vec<telos_agent::FuncOutcome>,
+) {
     let modules = parse(src).unwrap();
     let agent = StaticAgent::new();
     let mut outcomes = Vec::new();
@@ -103,7 +108,8 @@ fn ffi_bridge_is_bidirectional() {
 
     // Rust side: exports Rust fns + imports Go fns with safe wrappers.
     let rust_ffi = file("rust/src/ffi.rs");
-    assert!(rust_ffi.contains("pub extern \"C\" fn telos_Ledger_settle(acct_balance: *mut i64, amount: i64)"));
+    assert!(rust_ffi
+        .contains("pub extern \"C\" fn telos_Ledger_settle(acct_balance: *mut i64, amount: i64)"));
     assert!(rust_ffi.contains("fn telos_GatewayApi_enqueue(q_pending: *mut i64, count: i64);"));
     assert!(rust_ffi.contains("pub fn call_go_enqueue(q_pending: &mut i64, count: i64)"));
 
@@ -114,4 +120,3 @@ fn ffi_bridge_is_bidirectional() {
     assert!(go_ffi.contains("//export telos_GatewayApi_enqueue"));
     assert!(go_ffi.contains("Enqueue(&q, int64(count))"));
 }
-

@@ -100,7 +100,10 @@ fn plan(modules: &[Module], bodies: &HashMap<String, Vec<Stmt>>) -> Vec<FfiFunc>
         let target = telos_router::route(&m.attributes).target;
         for item in &m.items {
             if let Item::Func(f) = item {
-                let stmts = bodies.get(&f.name).cloned().unwrap_or_else(|| f.body.clone());
+                let stmts = bodies
+                    .get(&f.name)
+                    .cloned()
+                    .unwrap_or_else(|| f.body.clone());
                 let analysis = analyze_func(f, &stmts, &types);
                 funcs.push(FfiFunc {
                     module: m.name.clone(),
@@ -251,7 +254,10 @@ fn gen_rust_export(f: &FfiFunc) -> String {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                out.push_str(&format!("    let {}{} = {} {{ {} }};\n", mut_kw, name, ty, inits));
+                out.push_str(&format!(
+                    "    let {}{} = {} {{ {} }};\n",
+                    mut_kw, name, ty, inits
+                ));
                 if *mutated {
                     call_args.push(format!("&mut {}", name));
                 } else {
@@ -331,8 +337,17 @@ fn gen_rust_go_wrapper(f: &FfiFunc) -> String {
         "/// Safe wrapper: call the Go-generated `{}` from Rust.\n",
         f.func
     ));
-    out.push_str(&format!("pub fn {}({}){} {{\n", wrapper, sig_params.join(", "), ret));
-    out.push_str(&format!("    unsafe {{ {}({}) }}\n", f.c_name(), call_args.join(", ")));
+    out.push_str(&format!(
+        "pub fn {}({}){} {{\n",
+        wrapper,
+        sig_params.join(", "),
+        ret
+    ));
+    out.push_str(&format!(
+        "    unsafe {{ {}({}) }}\n",
+        f.c_name(),
+        call_args.join(", ")
+    ));
     out.push_str("}\n");
     out
 }
@@ -399,7 +414,12 @@ fn gen_go_call_rust(f: &FfiFunc) -> String {
         "// {} invokes the Rust-generated {} across the FFI boundary.\n",
         wrapper, f.func
     ));
-    out.push_str(&format!("func {}({}){} {{\n", wrapper, go_sig_params(f).join(", "), ret));
+    out.push_str(&format!(
+        "func {}({}){} {{\n",
+        wrapper,
+        go_sig_params(f).join(", "),
+        ret
+    ));
 
     let mut c_args = Vec::new();
     // Prepare cells.

@@ -211,9 +211,7 @@ fn parses_old_inside_arithmetic() {
     };
     match &f.ensures[0] {
         Expr::Bin {
-            op: BinOp::Eq,
-            rhs,
-            ..
+            op: BinOp::Eq, rhs, ..
         } => {
             // old(c.v) * 2  =>  Mul(Old(Field), Int(2))
             assert!(matches!(

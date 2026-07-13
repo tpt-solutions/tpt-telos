@@ -8,11 +8,7 @@ use telos_parser::ast::Literal;
 use telos_parser::lexer::{int_to_literal, lex, Token};
 
 fn toks(src: &str) -> Vec<Token> {
-    lex(src)
-        .unwrap()
-        .into_iter()
-        .map(|(t, _, _)| t)
-        .collect()
+    lex(src).unwrap().into_iter().map(|(t, _, _)| t).collect()
 }
 
 #[test]
@@ -105,7 +101,14 @@ fn skips_whitespace() {
 fn skips_line_comments() {
     // A `//` comment runs to end of line and is discarded.
     let t = toks("module // this is a comment\n wallet");
-    assert_eq!(t, vec![Token::KwModule, Token::Ident("wallet".to_string()), Token::Eof]);
+    assert_eq!(
+        t,
+        vec![
+            Token::KwModule,
+            Token::Ident("wallet".to_string()),
+            Token::Eof
+        ]
+    );
 }
 
 #[test]
@@ -144,8 +147,14 @@ fn tracks_multibyte_span_offsets() {
 #[test]
 fn errors_on_unexpected_character() {
     let err = lex("module # wallet").unwrap_err();
-    assert!(err.contains('#'), "error should mention the bad char: {err}");
-    assert!(err.contains("offset"), "error should report a position: {err}");
+    assert!(
+        err.contains('#'),
+        "error should mention the bad char: {err}"
+    );
+    assert!(
+        err.contains("offset"),
+        "error should report a position: {err}"
+    );
 }
 
 #[test]

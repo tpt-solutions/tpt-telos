@@ -9,7 +9,7 @@
 //! records the intended target so the dual-backend work (Phase 3) can consume
 //! it without further parsing changes.
 
-use telos_parser::ast::{Attribute, Arg};
+use telos_parser::ast::{Arg, Attribute};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -43,7 +43,12 @@ impl Route {
 const RUST_FLAGS: &[&str] = &["cpu_bound", "zero_allocation", "crypto", "real_time"];
 
 /// Boundary flags that imply a Go target.
-const GO_FLAGS: &[&str] = &["network_io", "high_concurrency", "distributed", "high_latency"];
+const GO_FLAGS: &[&str] = &[
+    "network_io",
+    "high_concurrency",
+    "distributed",
+    "high_latency",
+];
 
 fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
     let mut flags = Vec::new();
@@ -123,5 +128,80 @@ mod tests {
     fn no_flags_default_rust() {
         let r = route(&[]);
         assert_eq!(r.target, Target::Rust);
+    }
+
+    // ---- every Rust-bound boundary flag ----
+
+    #[test]
+    fn zero_allocation_routes_to_rust() {
+        let r = route(&[attr(&["zero_allocation"])]);
+        assert_eq!(r.target, Target::Rust);
+    }
+
+    #[test]
+    fn crypto_routes_to_rust() {
+        let r = route(&[attr(&["crypto"])]);
+        assert_eq!(r.target, Target::Rust);
+    }
+
+    #[test]
+    fn real_time_routes_to_rust() {
+        let r = route(&[attr(&["real_time"])]);
+        assert_eq!(r.target, Target::Rust);
+    }
+
+    // ---- every Go-bound boundary flag ----
+
+    #[test]
+    fn high_concurrency_routes_to_go() {
+        let r = route(&[attr(&["high_concurrency"])]);
+        assert_eq!(r.target, Target::Go);
+    }
+
+    #[test]
+    fn distributed_routes_to_go() {
+        let r = route(&[attr(&["distributed"])]);
+        assert_eq!(r.target, Target::Go);
+    }
+
+    #[test]
+    fn high_latency_routes_to_go() {
+        let r = route(&[attr(&["high_latency"])]);
+        assert_eq!(r.target, Target::Go);
+    }
+
+    // ---- combinations ----
+
+    #[test]
+    fn multiple_rust_flags_still_rust() {
+        let r = route(&[attr(&["cpu_bound", "zero_allocation", "crypto"])]);
+        assert_eq!(r.target, Target::Rust);
+    }
+
+    #[test]
+    fn multiple_go_flags_still_go() {
+        let r = route(&[attr(&["network_io", "high_concurrency"])]);
+        assert_eq!(r.target, Target::Go);
+    }
+
+    #[test]
+    fn go_flag_wins_over_rust_flag() {
+        // A mixed annotation is treated as a Go (distributed/network) target.
+        let r = route(&[attr(&["cpu_bound", "network_io"])]);
+        assert_eq!(r.target, Target::Go);
+    }
+
+    #[test]
+    fn unrecognised_flag_defaults_to_rust() {
+        // Unknown flags contribute nothing; the default compute backend applies.
+        let r = route(&[attr(&["some_future_flag"])]);
+        assert_eq!(r.target, Target::Rust);
+    }
+
+    #[test]
+    fn route_records_justification() {
+        let r = route(&[attr(&["network_io"])]);
+        assert!(r.reason.contains("network_io"));
+        assert!(r.is_rust() == (r.target == Target::Rust));
     }
 }

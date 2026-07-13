@@ -54,7 +54,12 @@ pub(crate) fn render_rust_ejected(f: &Func, stmts: &[Stmt], types: &TypeFields) 
     for e in &f.ensures {
         out.push_str(&format!("/// ensures:  {}\n", render_expr_doc(e)));
     }
-    out.push_str(&format!("pub fn {}({}){} {{\n", f.name, params.join(", "), ret));
+    out.push_str(&format!(
+        "pub fn {}({}){} {{\n",
+        f.name,
+        params.join(", "),
+        ret
+    ));
 
     for r in &f.requires {
         out.push_str(&format!(
@@ -67,7 +72,10 @@ pub(crate) fn render_rust_ejected(f: &Func, stmts: &[Stmt], types: &TypeFields) 
 
     let olds = collect_old_fields(&f.ensures);
     for (base, field) in &olds {
-        out.push_str(&format!("    let __old_{}_{} = {}.{};\n", base, field, base, field));
+        out.push_str(&format!(
+            "    let __old_{}_{} = {}.{};\n",
+            base, field, base, field
+        ));
     }
 
     let call_args = call_args(&analysis);
@@ -176,7 +184,12 @@ pub(crate) fn render_go_ejected(f: &Func, stmts: &[Stmt], types: &TypeFields) ->
     }
 
     let (params, ret) = go_sig(&analysis);
-    out.push_str(&format!("func {}({}){} {{\n", guard_name, params.join(", "), ret));
+    out.push_str(&format!(
+        "func {}({}){} {{\n",
+        guard_name,
+        params.join(", "),
+        ret
+    ));
 
     for r in &f.requires {
         out.push_str(&format!(

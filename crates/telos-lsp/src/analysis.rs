@@ -203,7 +203,10 @@ fn find_func_line(text: &str, name: &str) -> usize {
 }
 
 fn line_len(text: &str, line: usize) -> usize {
-    text.lines().nth(line).map(|l| l.chars().count()).unwrap_or(0)
+    text.lines()
+        .nth(line)
+        .map(|l| l.chars().count())
+        .unwrap_or(0)
 }
 
 /// Best-effort mapping of an error message to a source position. The lexer
@@ -248,7 +251,8 @@ fn word_at(text: &str, line: usize, character: usize) -> Option<String> {
     let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
     let mut start = character.min(chars.len());
     // If the cursor is just past the identifier, step back one.
-    if start > 0 && (start >= chars.len() || !is_ident(chars[start])) && is_ident(chars[start - 1]) {
+    if start > 0 && (start >= chars.len() || !is_ident(chars[start])) && is_ident(chars[start - 1])
+    {
         start -= 1;
     }
     if start >= chars.len() || !is_ident(chars[start]) {
