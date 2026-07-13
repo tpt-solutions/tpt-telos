@@ -1,36 +1,101 @@
 //! A real LLM-backed [`CodeAgent`], enabled by the `llm` cargo feature.
 //!
 //! This agent sends a structured prompt — the function's intent (`requires` /
-//! `ensures`, parameters, and the counter-example when rewriting) — to an
-//! OpenAI-compatible chat endpoint and parses the returned `mutate state { ... }`
+//! `ensures`, parameters, and the counter-example when rewriting) — to a
+//! configured LLM provider and parses the returned `mutate state { ... }`
 //! block back into the Telos statement AST. The compiler then verifies the
 //! result through the normal formal-verification loop, so even an imperfect LLM
 //! answer is caught and fed back until the contract is proven.
 //!
+//! Supported providers (`TELAS_LLM_PROVIDER`): `openai` (default), `ollama`,
+//! `openrouter`, `grok`, and `anthropic`. The first four all speak the
+//! OpenAI-compatible chat-completions wire format; `anthropic` uses Anthropic's
+//! native Messages API instead.
+//!
 //! Configuration (environment variables):
-//!   * `TELAS_LLM_URL`   – chat completions endpoint (default: OpenAI's).
-//!   * `TELAS_LLM_KEY`   – API key.
-//!   * `TELAS_LLM_MODEL` – model id (default: `gpt-4o-mini`).
+//!   * `TELAS_LLM_PROVIDER`   – `openai` | `ollama` | `openrouter` | `grok` |
+//!     `anthropic` (default: `openai`, or `anthropic` if `TELAS_LLM_URL`
+//!     contains `anthropic.com`).
+//!   * `TELAS_LLM_URL`        – API endpoint (default: provider-specific).
+//!   * `TELAS_LLM_KEY`        – API key.
+//!   * `TELAS_LLM_MODEL`      – model id (default: provider-specific).
+//!   * `TELAS_LLM_MAX_TOKENS` – max response tokens, only used by the
+//!     `anthropic` provider, which requires it (default: `4096`).
 
 use telos_parser::ast::*;
 
 use crate::{Candidate, CodeAgent, FuncSpec, Model};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Provider {
+    OpenAiCompatible,
+    Anthropic,
+}
+
 pub struct LlmAgent {
+    provider: Provider,
     url: String,
     key: String,
     model: String,
+    max_tokens: u32,
 }
 
 impl LlmAgent {
     pub fn from_env() -> Result<Self, String> {
         let key = std::env::var("TELAS_LLM_KEY")
             .map_err(|_| "TELAS_LLM_KEY not set (required by the LLM agent)".to_string())?;
+
+        let url_override = std::env::var("TELAS_LLM_URL").ok();
+        let provider_name = std::env::var("TELAS_LLM_PROVIDER").ok().unwrap_or_else(|| {
+            if url_override.as_deref().is_some_and(|u| u.contains("anthropic.com")) {
+                "anthropic".to_string()
+            } else {
+                "openai".to_string()
+            }
+        });
+
+        let (provider, default_url, default_model) = match provider_name.as_str() {
+            "openai" => (
+                Provider::OpenAiCompatible,
+                "https://api.openai.com/v1/chat/completions",
+                "gpt-4o-mini",
+            ),
+            "ollama" => (
+                Provider::OpenAiCompatible,
+                "http://localhost:11434/v1/chat/completions",
+                "llama3.1",
+            ),
+            "openrouter" => (
+                Provider::OpenAiCompatible,
+                "https://openrouter.ai/api/v1/chat/completions",
+                "openai/gpt-4o-mini",
+            ),
+            "grok" => (
+                Provider::OpenAiCompatible,
+                "https://api.x.ai/v1/chat/completions",
+                "grok-4",
+            ),
+            "anthropic" => (
+                Provider::Anthropic,
+                "https://api.anthropic.com/v1/messages",
+                "claude-sonnet-4-5",
+            ),
+            other => return Err(format!(
+                "unknown TELAS_LLM_PROVIDER '{other}' (expected one of: openai, ollama, openrouter, grok, anthropic)"
+            )),
+        };
+
+        let max_tokens = std::env::var("TELAS_LLM_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4096);
+
         Ok(Self {
-            url: std::env::var("TELAS_LLM_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1/chat/completions".to_string()),
+            provider,
+            url: url_override.unwrap_or_else(|| default_url.to_string()),
             key,
-            model: std::env::var("TELAS_LLM_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string()),
+            model: std::env::var("TELAS_LLM_MODEL").unwrap_or_else(|_| default_model.to_string()),
+            max_tokens,
         })
     }
 }
@@ -55,6 +120,13 @@ impl CodeAgent for LlmAgent {
 
 impl LlmAgent {
     fn complete(&self, prompt: &str) -> Result<String, String> {
+        match self.provider {
+            Provider::OpenAiCompatible => self.complete_openai_compatible(prompt),
+            Provider::Anthropic => self.complete_anthropic(prompt),
+        }
+    }
+
+    fn complete_openai_compatible(&self, prompt: &str) -> Result<String, String> {
         let req = ureq::post(&self.url)
             .set("Authorization", &format!("Bearer {}", self.key))
             .set("Content-Type", "application/json")
@@ -72,6 +144,30 @@ impl LlmAgent {
             .pointer("/choices/0/message/content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "LLM response missing choices[0].message.content".to_string())?
+            .to_string();
+        Ok(strip_code_fence(&content))
+    }
+
+    fn complete_anthropic(&self, prompt: &str) -> Result<String, String> {
+        let req = ureq::post(&self.url)
+            .set("x-api-key", &self.key)
+            .set("anthropic-version", "2023-06-01")
+            .set("Content-Type", "application/json")
+            .send_json(ureq::json!({
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "messages": [{ "role": "user", "content": prompt }],
+                "temperature": 0.0,
+            }))
+            .map_err(|e| format!("LLM request failed: {e}"))?;
+
+        let resp: serde_json::Value = req
+            .into_json()
+            .map_err(|e| format!("LLM response was not JSON: {e}"))?;
+        let content = resp
+            .pointer("/content/0/text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "LLM response missing content[0].text".to_string())?
             .to_string();
         Ok(strip_code_fence(&content))
     }

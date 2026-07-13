@@ -7,6 +7,7 @@ members = [
     "crates/telos-router",
     "crates/telos-agent",
     "crates/telos-codegen",
+    "crates/telos-lsp",
     "crates/telos-cli",
 ]
 

@@ -114,9 +114,18 @@ impl Parser {
     }
 
     fn parse_item(&mut self) -> Result<Item, String> {
+        let mut attributes = Vec::new();
+        while *self.peek() == Token::At {
+            attributes.push(self.parse_attribute()?);
+        }
         match self.peek() {
-            Token::KwInvariant => Ok(Item::Invariant(self.parse_invariant()?)),
-            Token::KwFunc => Ok(Item::Func(self.parse_func()?)),
+            Token::KwInvariant => {
+                if !attributes.is_empty() {
+                    return Err("attributes are not supported on `invariant` items".to_string());
+                }
+                Ok(Item::Invariant(self.parse_invariant()?))
+            }
+            Token::KwFunc => Ok(Item::Func(self.parse_func(attributes)?)),
             other => Err(format!("expected `invariant` or `func`, found {}", other)),
         }
     }
@@ -136,7 +145,7 @@ impl Parser {
         Ok(Invariant { name, constraints })
     }
 
-    fn parse_func(&mut self) -> Result<Func, String> {
+    fn parse_func(&mut self, attributes: Vec<Attribute>) -> Result<Func, String> {
         self.expect(Token::KwFunc)?;
         let name = self.expect_ident()?;
         self.expect(Token::LParen)?;
@@ -189,6 +198,7 @@ impl Parser {
         };
 
         Ok(Func {
+            attributes,
             name,
             params,
             requires,

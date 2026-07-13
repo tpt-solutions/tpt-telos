@@ -75,6 +75,10 @@ pub struct Param {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Func {
+    /// Item-level attributes, e.g. `@eject(rust)` marking a hand-written,
+    /// trusted opaque implementation whose contracts are enforced at the
+    /// boundary.
+    pub attributes: Vec<Attribute>,
     pub name: String,
     pub params: Vec<Param>,
     pub requires: Vec<Expr>,
@@ -83,6 +87,29 @@ pub struct Func {
     /// True when the body was elided with `;` (intent-only). The agentic
     /// synthesizer is responsible for providing an implementation.
     pub elided: bool,
+}
+
+impl Func {
+    /// Whether this function is "ejected" -- its body is a trusted opaque block
+    /// and only its outer contracts are enforced (at the boundary).
+    pub fn is_ejected(&self) -> bool {
+        self.attributes.iter().any(|a| a.name == "eject")
+    }
+
+    /// The explicit eject target language, if given as `@eject(rust)` /
+    /// `@eject(go)`.
+    pub fn eject_lang(&self) -> Option<&str> {
+        for a in &self.attributes {
+            if a.name == "eject" {
+                for arg in &a.args {
+                    if let Arg::Flag(f) = arg {
+                        return Some(f.as_str());
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

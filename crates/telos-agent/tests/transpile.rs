@@ -39,7 +39,15 @@ fn broken_is_repaired_by_the_loop() {
     assert!(!outs[0].iterations[0].passed, "first candidate should fail");
     assert!(outs[0].verified, "loop must end in a verified implementation");
 
-    let last = &outs[0].final_candidate.stmts;
     let text = telos_agent::render_candidate(&outs[0].final_candidate);
-    assert!(text.contains("-="), "repaired body should subtract: {:?}", last);
+    assert!(
+        text.contains("from.balance - amount"),
+        "repaired body should subtract: {}",
+        text
+    );
+    assert!(
+        !text.contains("from.balance + amount"),
+        "repaired body must not add: {}",
+        text
+    );
 }
