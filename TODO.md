@@ -113,18 +113,22 @@ eject hatch -> LSP. CLI surface: `telos parse | verify | transpile | build |
 project | eject | lsp`.
 
 ## Testing: Full Coverage
-> Current state: `telos-verifier` has unit tests (`src/solver.rs`) and an integration
-> test (`tests/wallet.rs`); `telos-agent` and `telos-codegen` each have one integration
-> test (`tests/transpile.rs`, `tests/gen.rs`). `telos-parser`, `telos-ir`, `telos-router`
-> (beyond one inline test), and `telos-cli` have no meaningful test coverage.
+> Final state: every crate now has unit tests for its core logic and at least one
+> integration test. `telos-parser`, `telos-ir`, `telos-router`, `telos-agent`,
+> `telos-codegen` gained unit/integration suites; `telos-verifier` gained the
+> `extended_tests` solver suite plus a `nested.telos` fixture (`tests/nested.rs`);
+> `telos-cli` gained integration tests driving the binary (`tests/cli.rs`).
+> A GitHub Actions workflow (`.github/workflows/ci.yml`) runs `cargo fmt --check`,
+> `clippy -D warnings`, `cargo test`, and `cargo llvm-cov --fail-under-lines 75`.
+> Workspace line coverage is ~80%.
 
-- [ ] `telos-parser`: unit tests for the lexer (tokens, whitespace/comment handling, error spans) and parser (every grammar production in `grammar.ebnf`, malformed-input error cases).
-- [ ] `telos-ir`: unit tests for AST -> IR lowering and constraint extraction (requires/ensures -> QF_LRA), including edge cases (empty contracts, nested expressions, unsupported constructs).
-- [ ] `telos-verifier`: expand `solver.rs`/`wallet.rs` coverage to include unsat-core/counterexample extraction, integer-overflow edge cases, and additional `.telos` fixtures beyond `wallet`/`broken`.
-- [ ] `telos-router`: unit tests for every `@boundary(...)` classification path (`cpu_bound`, `zero_allocation`, `crypto`, `network_io`, `high_concurrency`, `distributed`) and the default/unannotated case.
-- [ ] `telos-agent`: unit tests for `StaticAgent` synthesis logic in isolation (not just the end-to-end `transpile.rs` test), plus tests for the counter-example-guided rewrite loop hitting its retry/failure limits.
-- [ ] `telos-codegen`: unit tests for individual codegen pieces (struct field mutability, invariant `impl` generation, doc-comment emission) independent of the full `gen.rs` pipeline test.
-- [ ] `telos-cli`: integration tests for `telos verify`, `telos build`, and `telos transpile` covering success, verification failure, and malformed-file exit codes/output.
-- [ ] Add regression fixtures under `examples/` for each bug found going forward, and wire them into an existing or new integration test.
-- [ ] Set up `cargo llvm-cov` (or `tarpaulin`) in CI to track coverage per-crate and fail below an agreed threshold.
-- [ ] **Milestone:** every crate in the workspace has unit tests for its core logic and at least one integration test; CI enforces a minimum coverage threshold.
+- [x] `telos-parser`: unit tests for the lexer (tokens, whitespace/comment handling, error spans) and parser (every grammar production in `grammar.ebnf`, malformed-input error cases). (`tests/lexer.rs`, `tests/parser.rs`)
+- [x] `telos-ir`: unit tests for AST -> IR lowering and constraint extraction (requires/ensures -> QF_LRA), including edge cases (empty contracts, nested expressions, unsupported constructs). (`tests/extract.rs`)
+- [x] `telos-verifier`: expanded `solver.rs`/`wallet.rs` coverage to include unsat-core/counterexample extraction, integer-overflow edge cases, and additional `.telos` fixtures beyond `wallet`/`broken` (`tests/nested.rs`). (`src/solver.rs` `extended_tests`).
+- [x] `telos-router`: unit tests for every `@boundary(...)` classification path (`cpu_bound`, `zero_allocation`, `crypto`, `network_io`, `high_concurrency`, `distributed`, plus `real_time`/`high_latency`) and the default/unannotated case. (`src/lib.rs` tests).
+- [x] `telos-agent`: unit tests for `StaticAgent` synthesis logic in isolation, plus tests for the counter-example-guided rewrite loop hitting its retry/failure limits. (`tests/static_agent.rs`).
+- [x] `telos-codegen`: unit tests for individual codegen pieces (struct field mutability, invariant `impl` generation, doc-comment emission, `analyze_func`, `collect_types`, eject hatch) independent of the full `gen.rs` pipeline test. (`src/lib.rs` tests).
+- [x] `telos-cli`: integration tests for `telos verify`, `telos build`, `telos transpile`, `telos project`, and `telos eject` covering success, verification failure, and malformed-file exit codes/output. (`tests/cli.rs`)
+- [x] Add regression fixtures under `examples/` for each bug found going forward, and wire them into an existing or new integration test. (`examples/nested.telos` wired into `telos-verifier/tests/nested.rs`.)
+- [x] Set up `cargo llvm-cov` in CI to track coverage per-crate and fail below an agreed threshold. (`.github/workflows/ci.yml`, `--fail-under-lines 75`.)
+- [x] **Milestone:** every crate in the workspace has unit tests for its core logic and at least one integration test; CI enforces a minimum coverage threshold.

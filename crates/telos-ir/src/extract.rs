@@ -1,11 +1,11 @@
 //! Extraction of verification problems from the AST.
 //!
 //! For each `func`, we build:
-//!   * `premises`     -- requires, type constraints, entry invariants, frame
-//!                       axioms, and `mutate state` assignments (which define
-//!                       post-state variables).
-//!   * `conclusions`  -- `ensures` clauses and invariants that must hold in the
-//!                       post-state.
+//! * `premises` -- requires, type constraints, entry invariants, frame
+//!   axioms, and `mutate state` assignments (which define post-state
+//!   variables).
+//! * `conclusions` -- `ensures` clauses and invariants that must hold in the
+//!   post-state.
 //!
 //! State variables are named `"<base>.<field>"` in the pre-state and
 //! `"<base>.<field>'"` in the post-state. `old(e)` always resolves to the
