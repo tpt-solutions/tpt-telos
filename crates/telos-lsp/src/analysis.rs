@@ -4,8 +4,8 @@
 //! surface diagnostics and hover information. Kept free of any I/O or JSON so it
 //! is directly unit-testable.
 
-use telos_parser::ast::*;
-use telos_parser::parse;
+use tpt_telos_parser::ast::*;
+use tpt_telos_parser::parse;
 
 /// LSP diagnostic severity codes.
 pub const SEVERITY_ERROR: u8 = 1;
@@ -43,17 +43,17 @@ pub struct FuncReport {
 /// error string.
 pub fn analyze(text: &str) -> Result<Vec<FuncReport>, String> {
     let modules = parse(text)?;
-    let problems = telos_ir::extract(&modules)?;
+    let problems = tpt_telos_ir::extract(&modules)?;
 
     let mut reports = Vec::new();
     for m in &modules {
-        let target = telos_router::route(&m.attributes).target.as_str();
+        let target = tpt_telos_router::route(&m.attributes).target.as_str();
         for item in &m.items {
             if let Item::Func(f) = item {
                 let problem = problems.iter().find(|p| p.func_name == f.name);
                 let (verified, failures) = match problem {
                     Some(p) => {
-                        let r = telos_verifier::verify(p);
+                        let r = tpt_telos_verifier::verify(p);
                         (
                             r.all_passed,
                             r.checks

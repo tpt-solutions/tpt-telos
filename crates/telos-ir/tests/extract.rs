@@ -5,8 +5,8 @@
 //! invariant entry and maintenance, frame axioms, `old(...)` inside nested
 //! arithmetic, and rejection of unsupported non-linear constructs.
 
-use telos_ir::{extract, Constraint, Linear, Relation};
-use telos_parser::parse;
+use tpt_telos_ir::{extract, Constraint, Linear, Relation};
+use tpt_telos_parser::parse;
 
 // ---- helpers -------------------------------------------------------------
 
@@ -52,7 +52,7 @@ fn linear_constant_only() {
 
 // ---- extract --------------------------------------------------------------
 
-fn first_problem(src: &str) -> telos_ir::VerificationProblem {
+fn first_problem(src: &str) -> tpt_telos_ir::VerificationProblem {
     let modules = parse(src).unwrap();
     let mut probs = extract(&modules).unwrap();
     assert_eq!(probs.len(), 1, "expected exactly one function problem");

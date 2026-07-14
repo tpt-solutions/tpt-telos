@@ -1,18 +1,24 @@
 [package]
-name = "telos-agent"
+name = "tpt-telos-agent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Agentic transpiler backend for tpt-telos (StaticAgent + LLM agent)"
 
 [features]
 # Enables the real LLM-backed agent (requires network + an API key at runtime).
 llm = ["ureq", "serde_json"]
 
 [dependencies]
-telos-parser = { path = "../telos-parser" }
-telos-ir = { path = "../telos-ir" }
-telos-verifier = { path = "../telos-verifier" }
-telos-router = { path = "../telos-router" }
+tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }
+tpt-telos-ir = { path = "../telos-ir", version = "0.1.0" }
+tpt-telos-verifier = { path = "../telos-verifier", version = "0.1.0" }
+tpt-telos-router = { path = "../telos-router", version = "0.1.0" }
 ureq = { version = "2", features = ["json"], optional = true }
 serde_json = { version = "1", optional = true }
 

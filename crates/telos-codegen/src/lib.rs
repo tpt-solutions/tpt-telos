@@ -10,13 +10,13 @@
 //!   * carries the original `requires` / `ensures` contracts as doc-comments.
 //!
 //! The function bodies come from the agentic transpiler's final candidates
-//! (see [`telos_agent`]), so the emitted code is mathematically verified before
+//! (see [`tpt_telos_agent`]), so the emitted code is mathematically verified before
 //! it is written out.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use telos_agent::FuncOutcome;
-use telos_parser::ast::*;
+use tpt_telos_agent::FuncOutcome;
+use tpt_telos_parser::ast::*;
 
 pub mod eject;
 pub mod ffi;
@@ -226,7 +226,7 @@ fn generate_module(
     bodies: &HashMap<String, Vec<Stmt>>,
     types: &TypeFields,
 ) -> String {
-    let route = telos_router::route(&module.attributes);
+    let route = tpt_telos_router::route(&module.attributes);
     let mut out = String::new();
     out.push_str(&format!(
         "// ===== module {} (target: {}) =====\n",
@@ -482,7 +482,7 @@ fn render_inv(e: &Expr) -> String {
 mod tests {
     use std::collections::{BTreeSet, HashMap};
 
-    use telos_parser::ast::*;
+    use tpt_telos_parser::ast::*;
 
     use crate::{
         analyze_func, collect_types, eject, generate_program, go, render_func, InputParam,
@@ -792,7 +792,7 @@ mod tests {
         // invariant alone does not populate the struct type).
         let src =
             "module M { invariant Counter { v >= 0 } func f(c: Counter) requires c.v >= 0 { } }";
-        let modules = telos_parser::parse(src).unwrap();
+        let modules = tpt_telos_parser::parse(src).unwrap();
         let rust = generate_program(&modules, &[]);
         assert!(rust.contains("pub struct Counter"));
         assert!(rust.contains("pub fn satisfies_invariants"));

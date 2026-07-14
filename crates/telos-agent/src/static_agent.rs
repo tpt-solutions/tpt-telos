@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use telos_parser::ast::*;
+use tpt_telos_parser::ast::*;
 
 use crate::{Candidate, CodeAgent, FuncSpec, Model};
 

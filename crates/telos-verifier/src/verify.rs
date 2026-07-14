@@ -1,7 +1,7 @@
 //! Top-level verification driver over a `VerificationProblem`.
 
 use crate::solver::{entails, unsat};
-use telos_ir::{Constraint, VerificationProblem};
+use tpt_telos_ir::{Constraint, VerificationProblem};
 
 #[derive(Debug, Clone)]
 pub struct CheckResult {

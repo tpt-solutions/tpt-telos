@@ -1,7 +1,7 @@
-use telos_agent::{transpile_module, StaticAgent};
-use telos_parser::parse;
+use tpt_telos_agent::{transpile_module, StaticAgent};
+use tpt_telos_parser::parse;
 
-fn outcomes_for(path: &str) -> Vec<telos_agent::FuncOutcome> {
+fn outcomes_for(path: &str) -> Vec<tpt_telos_agent::FuncOutcome> {
     let src = std::fs::read_to_string(path).unwrap();
     let modules = parse(&src).unwrap();
     let agent = StaticAgent::new();
@@ -49,7 +49,7 @@ fn broken_is_repaired_by_the_loop() {
         "loop must end in a verified implementation"
     );
 
-    let text = telos_agent::render_candidate(&outs[0].final_candidate);
+    let text = tpt_telos_agent::render_candidate(&outs[0].final_candidate);
     assert!(
         text.contains("from.balance - amount"),
         "repaired body should subtract: {}",

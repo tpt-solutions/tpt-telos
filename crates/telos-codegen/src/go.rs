@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use telos_parser::ast::*;
+use tpt_telos_parser::ast::*;
 
 use crate::{
     analyze_func, collect_types, render_expr_doc, render_params_sig, InputParam, TypeFields,
@@ -82,7 +82,7 @@ fn generate_module(
     bodies: &HashMap<String, Vec<Stmt>>,
     types: &TypeFields,
 ) -> String {
-    let route = telos_router::route(&module.attributes);
+    let route = tpt_telos_router::route(&module.attributes);
     let mut out = String::new();
     out.push_str(&format!(
         "// ===== module {} (target: {}) =====\n",

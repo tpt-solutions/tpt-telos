@@ -22,7 +22,7 @@
 //!   * `TELAS_LLM_MAX_TOKENS` – max response tokens, only used by the
 //!     `anthropic` provider, which requires it (default: `4096`).
 
-use telos_parser::ast::*;
+use tpt_telos_parser::ast::*;
 
 use crate::{Candidate, CodeAgent, FuncSpec, Model};
 
@@ -197,7 +197,7 @@ fn parse_body(body: &str) -> Result<Candidate, String> {
         "module _T {{\n    func _f() {{\n        {}\n    }}\n}}\n",
         body
     );
-    let modules = telos_parser::parse(&wrapped)?;
+    let modules = tpt_telos_parser::parse(&wrapped)?;
     for m in &modules {
         for item in &m.items {
             if let Item::Func(f) = item {

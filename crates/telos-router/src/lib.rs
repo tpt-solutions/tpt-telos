@@ -9,7 +9,7 @@
 //! records the intended target so the dual-backend work (Phase 3) can consume
 //! it without further parsing changes.
 
-use telos_parser::ast::{Arg, Attribute};
+use tpt_telos_parser::ast::{Arg, Attribute};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -103,7 +103,7 @@ pub fn route(attrs: &[Attribute]) -> Route {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use telos_parser::ast::{Arg, Attribute};
+    use tpt_telos_parser::ast::{Arg, Attribute};
 
     fn attr(flags: &[&str]) -> Attribute {
         Attribute {

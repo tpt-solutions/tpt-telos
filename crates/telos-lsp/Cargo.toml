@@ -1,16 +1,21 @@
 [package]
-name = "telos-lsp"
+name = "tpt-telos-lsp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 description = "Language Server Protocol server for tpt-telos"
 
 [dependencies]
-telos-parser = { path = "../telos-parser" }
-telos-ir = { path = "../telos-ir" }
-telos-verifier = { path = "../telos-verifier" }
-telos-router = { path = "../telos-router" }
-telos-agent = { path = "../telos-agent" }
-telos-codegen = { path = "../telos-codegen" }
+tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }
+tpt-telos-ir = { path = "../telos-ir", version = "0.1.0" }
+tpt-telos-verifier = { path = "../telos-verifier", version = "0.1.0" }
+tpt-telos-router = { path = "../telos-router", version = "0.1.0" }
+tpt-telos-agent = { path = "../telos-agent", version = "0.1.0" }
+tpt-telos-codegen = { path = "../telos-codegen", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

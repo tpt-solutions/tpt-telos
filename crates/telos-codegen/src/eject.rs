@@ -15,7 +15,7 @@
 //! This is the "two-way bridge": telos -> raw code (the opaque block), and raw
 //! code -> telos (re-entering behind contract guards).
 
-use telos_parser::ast::*;
+use tpt_telos_parser::ast::*;
 
 use crate::go::exported;
 use crate::{analyze_func, render_expr_doc, render_params_sig, InputParam, TypeFields};

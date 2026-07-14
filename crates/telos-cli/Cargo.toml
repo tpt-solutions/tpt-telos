@@ -1,8 +1,14 @@
 [package]
-name = "telos-cli"
+name = "tpt-telos"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
 description = "Command-line interface for the tpt-telos compiler"
 
 [[bin]]
@@ -10,15 +16,15 @@ name = "telos"
 path = "src/main.rs"
 
 [dependencies]
-telos-parser = { path = "../telos-parser" }
-telos-ir = { path = "../telos-ir" }
-telos-verifier = { path = "../telos-verifier" }
-telos-router = { path = "../telos-router" }
-telos-agent = { path = "../telos-agent" }
-telos-codegen = { path = "../telos-codegen" }
-telos-lsp = { path = "../telos-lsp" }
+tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }
+tpt-telos-ir = { path = "../telos-ir", version = "0.1.0" }
+tpt-telos-verifier = { path = "../telos-verifier", version = "0.1.0" }
+tpt-telos-router = { path = "../telos-router", version = "0.1.0" }
+tpt-telos-agent = { path = "../telos-agent", version = "0.1.0" }
+tpt-telos-codegen = { path = "../telos-codegen", version = "0.1.0" }
+tpt-telos-lsp = { path = "../telos-lsp", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 
 [features]
 # Enables the `telos transpile --llm` / `build --llm` real LLM backend.
-llm = ["telos-agent/llm"]
+llm = ["tpt-tpt-telos-agent/llm"]

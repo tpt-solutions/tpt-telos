@@ -10,7 +10,7 @@
 //! Elimination uses Fourier-Motzkin variable elimination.
 
 use std::collections::HashMap;
-use telos_ir::{Constraint, Relation};
+use tpt_telos_ir::{Constraint, Relation};
 
 #[derive(Clone, Debug)]
 struct LinIneq {
@@ -422,7 +422,7 @@ pub fn satisfies_model(cs: &[Constraint], model: &Model) -> bool {
 #[cfg(test)]
 mod model_tests {
     use super::*;
-    use telos_ir::Linear;
+    use tpt_telos_ir::Linear;
 
     fn c(terms: &[(&str, i64)], k: i64, rel: Relation) -> Constraint {
         Constraint(
@@ -477,7 +477,7 @@ mod model_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use telos_ir::Linear;
+    use tpt_telos_ir::Linear;
 
     fn c(terms: &[(&str, i64)], k: i64, rel: Relation) -> Constraint {
         Constraint(
@@ -540,7 +540,7 @@ mod tests {
 #[cfg(test)]
 mod extended_tests {
     use super::*;
-    use telos_ir::Linear;
+    use tpt_telos_ir::Linear;
 
     fn c(terms: &[(&str, i64)], k: i64, rel: Relation) -> Constraint {
         Constraint(

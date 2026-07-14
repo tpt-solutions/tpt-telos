@@ -7,9 +7,9 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use telos_agent::static_agent::synthesize_from_ensures;
-use telos_agent::{transpile_func, Candidate, CodeAgent, FuncSpec, StaticAgent};
-use telos_parser::ast::*;
+use tpt_telos_agent::static_agent::synthesize_from_ensures;
+use tpt_telos_agent::{transpile_func, Candidate, CodeAgent, FuncSpec, StaticAgent};
+use tpt_telos_parser::ast::*;
 
 // ---- AST builders ---------------------------------------------------------
 
@@ -90,7 +90,7 @@ fn synthesize_field_and_scalar_from_ensures() {
     let spec = FuncSpec::new(vec![], func);
     let cand = synthesize_from_ensures(&spec);
 
-    let text = telos_agent::render_candidate(&cand);
+    let text = tpt_telos_agent::render_candidate(&cand);
     // `old(...)` must be resolved away in the synthesized body.
     assert!(!text.contains("old("), "old() should be resolved: {text}");
     // Field assignment uses the current state, not the pre-state.
@@ -122,7 +122,7 @@ fn synthesize_resolves_nested_old_arithmetic() {
     );
     let spec = FuncSpec::new(vec![], func);
     let cand = synthesize_from_ensures(&spec);
-    let text = telos_agent::render_candidate(&cand);
+    let text = tpt_telos_agent::render_candidate(&cand);
     assert!(text.contains("c.v = c.v * 2"), "missing mul assign: {text}");
 }
 
@@ -240,7 +240,7 @@ fn rewrite_fixes_broken_field_from_counter_example() {
 
     let agent = StaticAgent::new();
     let repaired = agent.rewrite(&spec, &broken, &ce).unwrap();
-    let text = telos_agent::render_candidate(&repaired);
+    let text = tpt_telos_agent::render_candidate(&repaired);
     assert!(
         text.contains("from.balance - amount"),
         "repair should subtract: {text}"
@@ -278,7 +278,7 @@ fn rewrite_with_empty_counter_example_resynthesizes() {
     let spec = FuncSpec::new(vec![], func);
     let agent = StaticAgent::new();
     let repaired = agent.rewrite(&spec, &broken, &HashMap::new()).unwrap();
-    let text = telos_agent::render_candidate(&repaired);
+    let text = tpt_telos_agent::render_candidate(&repaired);
     assert!(
         text.contains("c.v = c.v + 1"),
         "should resynthesize from contract: {text}"

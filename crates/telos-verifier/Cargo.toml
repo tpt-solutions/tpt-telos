@@ -1,12 +1,17 @@
 [package]
-name = "telos-verifier"
+name = "tpt-telos-verifier"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 description = "Self-contained SMT-style verifier (QF_LRA) for tpt-telos constraints"
 
 [dependencies]
-telos-ir = { path = "../telos-ir" }
+tpt-telos-ir = { path = "../telos-ir", version = "0.1.0" }
 
 [dev-dependencies]
-telos-parser = { path = "../telos-parser" }
+tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }

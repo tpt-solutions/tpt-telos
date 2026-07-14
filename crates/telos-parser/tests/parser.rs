@@ -5,8 +5,8 @@
 //! operator precedence, `old(...)`) and a battery of malformed-input cases that
 //! must be rejected with an `Err`.
 
-use telos_parser::ast::*;
-use telos_parser::parse;
+use tpt_telos_parser::ast::*;
+use tpt_telos_parser::parse;
 
 fn parse_one(src: &str) -> Module {
     let modules = parse(src).expect("expected successful parse");

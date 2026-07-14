@@ -26,9 +26,9 @@ pub mod llm_agent;
 
 pub use static_agent::StaticAgent;
 
-use telos_ir::{extract, VerificationProblem};
-use telos_parser::ast::*;
-use telos_verifier::{counterexample, verify, Model, VerificationResult};
+use tpt_telos_ir::{extract, VerificationProblem};
+use tpt_telos_parser::ast::*;
+use tpt_telos_verifier::{counterexample, verify, Model, VerificationResult};
 
 /// An owned view of a single function's verification intent, detached from the
 /// surrounding module so agents can be reasoned about in isolation.
@@ -81,7 +81,7 @@ pub struct LoopStep {
 #[derive(Clone)]
 pub struct FuncOutcome {
     pub func_name: String,
-    pub target: telos_router::Target,
+    pub target: tpt_telos_router::Target,
     pub agent: String,
     pub iterations: Vec<LoopStep>,
     pub final_candidate: Candidate,
@@ -138,7 +138,7 @@ pub fn transpile_func(
         _ => return Err("transpile_func requires a function item".into()),
     };
     let spec = FuncSpec::new(module.attributes.clone(), func.clone());
-    let target = telos_router::route(&module.attributes).target;
+    let target = tpt_telos_router::route(&module.attributes).target;
 
     let mut candidate = if func.elided || func.body.is_empty() {
         agent.generate(&spec)?

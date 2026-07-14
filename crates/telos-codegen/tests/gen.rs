@@ -1,12 +1,12 @@
-use telos_agent::{transpile_module, StaticAgent};
-use telos_codegen::{generate_program, generate_project};
-use telos_parser::parse;
+use tpt_telos_agent::{transpile_module, StaticAgent};
+use tpt_telos_codegen::{generate_program, generate_project};
+use tpt_telos_parser::parse;
 
 fn outcomes_for(
     src: &str,
 ) -> (
-    Vec<telos_parser::ast::Module>,
-    Vec<telos_agent::FuncOutcome>,
+    Vec<tpt_telos_parser::ast::Module>,
+    Vec<tpt_telos_agent::FuncOutcome>,
 ) {
     let modules = parse(src).unwrap();
     let agent = StaticAgent::new();

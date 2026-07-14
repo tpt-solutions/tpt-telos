@@ -4,9 +4,9 @@
 //! (constant multiplication, `old()` inside `ensures`) and another using `&&`
 //! flattening in `requires`. Both are expected to verify.
 
-use telos_ir::extract;
-use telos_parser::parse;
-use telos_verifier::verify;
+use tpt_telos_ir::extract;
+use tpt_telos_parser::parse;
+use tpt_telos_verifier::verify;
 
 #[test]
 fn nested_example_passes() {

@@ -19,9 +19,9 @@
 use std::io;
 use std::path::Path;
 
-use telos_agent::FuncOutcome;
-use telos_parser::ast::*;
-use telos_router::Target;
+use tpt_telos_agent::FuncOutcome;
+use tpt_telos_parser::ast::*;
+use tpt_telos_router::Target;
 
 use crate::{collect_bodies, ffi, go, render_rust};
 
@@ -64,11 +64,11 @@ pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project
 
     let rust_mods: Vec<&Module> = modules
         .iter()
-        .filter(|m| telos_router::route(&m.attributes).target == Target::Rust)
+        .filter(|m| tpt_telos_router::route(&m.attributes).target == Target::Rust)
         .collect();
     let go_mods: Vec<&Module> = modules
         .iter()
-        .filter(|m| telos_router::route(&m.attributes).target == Target::Go)
+        .filter(|m| tpt_telos_router::route(&m.attributes).target == Target::Go)
         .collect();
 
     let has_rust = !rust_mods.is_empty();

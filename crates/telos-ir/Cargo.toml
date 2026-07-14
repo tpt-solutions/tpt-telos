@@ -1,9 +1,14 @@
 [package]
-name = "telos-ir"
+name = "tpt-telos-ir"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 description = "Intermediate representation and constraint extraction for tpt-telos"
 
 [dependencies]
-telos-parser = { path = "../telos-parser" }
+tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }

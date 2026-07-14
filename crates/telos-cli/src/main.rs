@@ -15,14 +15,14 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::process::ExitCode;
 
-use telos_agent::{transpile_module, StaticAgent};
-use telos_codegen::{generate_program, generate_project};
-use telos_parser::ast::*;
-use telos_parser::parse;
-use telos_verifier::verify;
+use tpt_telos_agent::{transpile_module, StaticAgent};
+use tpt_telos_codegen::{generate_program, generate_project};
+use tpt_telos_parser::ast::*;
+use tpt_telos_parser::parse;
+use tpt_telos_verifier::verify;
 
 #[cfg(feature = "llm")]
-use telos_agent::llm_agent::LlmAgent;
+use tpt_telos_agent::llm_agent::LlmAgent;
 
 #[derive(Parser)]
 #[command(
@@ -175,7 +175,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Command::Lsp => match telos_lsp::run_stdio() {
+        Command::Lsp => match tpt_telos_lsp::run_stdio() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("lsp error: {e}");
@@ -220,7 +220,7 @@ fn run_parse(file: &str) -> Result<(), String> {
 
 fn run_verify(file: &str) -> Result<bool, String> {
     let modules = load_modules(file)?;
-    let problems = telos_ir::extract(&modules)?;
+    let problems = tpt_telos_ir::extract(&modules)?;
 
     if problems.is_empty() {
         eprintln!("warning: no functions found to verify in `{file}`");
@@ -251,7 +251,7 @@ fn run_verify(file: &str) -> Result<bool, String> {
     Ok(overall)
 }
 
-fn make_agent(llm: bool) -> Result<Box<dyn telos_agent::CodeAgent>, String> {
+fn make_agent(llm: bool) -> Result<Box<dyn tpt_telos_agent::CodeAgent>, String> {
     if llm {
         #[cfg(feature = "llm")]
         {
@@ -395,7 +395,7 @@ fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool
     let mut all_verified = true;
     println!("Dual-backend transpiler (agent: {})\n", agent.name());
     for m in &modules {
-        let target = telos_router::route(&m.attributes).target;
+        let target = tpt_telos_router::route(&m.attributes).target;
         for o in transpile_module(m, agent.as_ref())? {
             println!(
                 "  {} :: {}  [target: {}]  {}",
@@ -524,7 +524,7 @@ fn run_eject(file: &str, out_dir: &str, only: Option<&str>, llm: bool) -> Result
     // always honored; here we additionally eject on demand from the CLI.
     let mut ejected: Vec<(String, String, String)> = Vec::new(); // (module, func, lang)
     for m in &mut modules {
-        let lang = telos_router::route(&m.attributes)
+        let lang = tpt_telos_router::route(&m.attributes)
             .target
             .as_str()
             .to_string();

@@ -1,6 +1,6 @@
-use telos_ir::extract;
-use telos_parser::parse;
-use telos_verifier::verify;
+use tpt_telos_ir::extract;
+use tpt_telos_parser::parse;
+use tpt_telos_verifier::verify;
 
 #[test]
 fn wallet_example_passes() {

@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use telos_lsp::{analysis, Server};
+use tpt_telos_lsp::{analysis, Server};
 
 fn read(path: &str) -> String {
     std::fs::read_to_string(path).unwrap()

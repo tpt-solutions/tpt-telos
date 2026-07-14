@@ -20,8 +20,8 @@
 
 use std::collections::HashMap;
 
-use telos_parser::ast::*;
-use telos_router::Target;
+use tpt_telos_parser::ast::*;
+use tpt_telos_router::Target;
 
 use crate::{analyze_func, collect_types, go::exported, InputParam, TypeFields};
 
@@ -97,7 +97,7 @@ fn plan(modules: &[Module], bodies: &HashMap<String, Vec<Stmt>>) -> Vec<FfiFunc>
     for m in modules {
         let mut types: TypeFields = HashMap::new();
         collect_types(m, &mut types);
-        let target = telos_router::route(&m.attributes).target;
+        let target = tpt_telos_router::route(&m.attributes).target;
         for item in &m.items {
             if let Item::Func(f) = item {
                 let stmts = bodies

@@ -4,8 +4,8 @@
 //! integer literals, span tracking, the `int_to_literal` helper, and error
 //! reporting for unexpected characters.
 
-use telos_parser::ast::Literal;
-use telos_parser::lexer::{int_to_literal, lex, Token};
+use tpt_telos_parser::ast::Literal;
+use tpt_telos_parser::lexer::{int_to_literal, lex, Token};
 
 fn toks(src: &str) -> Vec<Token> {
     lex(src).unwrap().into_iter().map(|(t, _, _)| t).collect()

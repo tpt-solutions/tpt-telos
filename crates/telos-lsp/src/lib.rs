@@ -195,18 +195,18 @@ fn verify_summary(text: &str) -> Value {
 }
 
 fn eject_preview(text: &str, func: Option<&str>) -> Result<String, String> {
-    use telos_parser::ast::{Arg, Attribute, Item};
+    use tpt_telos_parser::ast::{Arg, Attribute, Item};
 
-    let mut modules = telos_parser::parse(text)?;
-    let agent = telos_agent::StaticAgent::new();
+    let mut modules = tpt_telos_parser::parse(text)?;
+    let agent = tpt_telos_agent::StaticAgent::new();
     let mut outcomes = Vec::new();
     for m in &modules {
-        outcomes.extend(telos_agent::transpile_module(m, &agent)?);
+        outcomes.extend(tpt_telos_agent::transpile_module(m, &agent)?);
     }
 
     let mut matched = false;
     for m in &mut modules {
-        let lang = telos_router::route(&m.attributes)
+        let lang = tpt_telos_router::route(&m.attributes)
             .target
             .as_str()
             .to_string();
@@ -232,7 +232,7 @@ fn eject_preview(text: &str, func: Option<&str>) -> Result<String, String> {
         ));
     }
 
-    let project = telos_codegen::generate_project(&modules, &outcomes);
+    let project = tpt_telos_codegen::generate_project(&modules, &outcomes);
     let mut preview = String::new();
     for f in &project.files {
         if f.path.ends_with(".rs") || f.path.ends_with(".go") {

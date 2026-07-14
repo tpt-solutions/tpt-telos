@@ -13,7 +13,7 @@
 
 use crate::ir::*;
 use std::collections::{HashMap, HashSet};
-use telos_parser::ast::*;
+use tpt_telos_parser::ast::*;
 
 type Naming = dyn Fn(&str, &str) -> String;
 
