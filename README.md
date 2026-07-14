@@ -19,13 +19,13 @@ build or run.
 ## Install
 
 ```sh
-cargo install telos-cli
+cargo install tpt-telos
 ```
 
 Or build from this workspace:
 
 ```sh
-cargo build --release -p telos-cli
+cargo build --release -p tpt-telos
 ```
 
 ## Usage
@@ -59,7 +59,7 @@ By default the agentic transpiler runs the fully offline `StaticAgent`. To use a
 real LLM backend, build with the `llm` feature and pass `--llm`:
 
 ```sh
-cargo run -p telos-cli --features llm -- transpile examples/intent.telos --llm
+cargo run -p tpt-telos --features llm -- transpile examples/intent.telos --llm
 ```
 
 At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
@@ -70,14 +70,14 @@ At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
 
 | Crate           | Purpose                                                       |
 |-----------------|---------------------------------------------------------------|
-| `telos-cli`     | The `telos` binary and CLI surface.                           |
-| `telos-parser`  | Lexer, parser, and AST.                                       |
-| `telos-ir`      | AST → IR lowering + QF_LRA constraint extraction.             |
-| `telos-verifier`| Self-contained Fourier–Motzkin SMT-style solver.              |
-| `telos-router`  | Classifies modules to Rust/Go from `@boundary(...)`.          |
-| `telos-agent`   | `CodeAgent` trait: `StaticAgent` + `LlmAgent` (behind `llm`). |
-| `telos-codegen` | Rust/Go backends, FFI bridge, eject, project assembly.        |
-| `telos-lsp`     | JSON-RPC 2.0 language server over stdio.                      |
+| `tpt-telos`     | The `telos` binary and CLI surface.                           |
+| `tpt-telos-parser`  | Lexer, parser, and AST.                                       |
+| `tpt-telos-ir`      | AST → IR lowering + QF_LRA constraint extraction.             |
+| `tpt-telos-verifier`| Self-contained Fourier–Motzkin SMT-style solver.              |
+| `tpt-telos-router`  | Classifies modules to Rust/Go from `@boundary(...)`.          |
+| `tpt-telos-agent`   | `CodeAgent` trait: `StaticAgent` + `LlmAgent` (behind `llm`). |
+| `tpt-telos-codegen` | Rust/Go backends, FFI bridge, eject, project assembly.        |
+| `tpt-telos-lsp`     | JSON-RPC 2.0 language server over stdio.                      |
 
 ## License
 

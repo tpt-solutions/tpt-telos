@@ -41,7 +41,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release -p telos-cli --target ${{ matrix.target }}
+        run: cargo build --release -p tpt-telos --target ${{ matrix.target }}
       - name: Package
         shell: bash
         run: |
@@ -71,8 +71,8 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          for crate in telos-parser telos-ir telos-router telos-verifier \
-                       telos-agent telos-codegen telos-lsp telos-cli; do
+          for crate in tpt-telos-parser tpt-telos-ir tpt-telos-router tpt-telos-verifier \
+                       tpt-telos-agent tpt-telos-codegen tpt-telos-lsp tpt-telos; do
             echo "::group::Publishing $crate"
             cargo publish -p "$crate" --no-verify
             echo "::endgroup::"

@@ -533,81 +533,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "telos-agent"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "telos-ir",
- "telos-parser",
- "telos-router",
- "telos-verifier",
- "ureq",
-]
-
-[[package]]
-name = "telos-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "telos-agent",
- "telos-codegen",
- "telos-ir",
- "telos-lsp",
- "telos-parser",
- "telos-router",
- "telos-verifier",
-]
-
-[[package]]
-name = "telos-codegen"
-version = "0.1.0"
-dependencies = [
- "telos-agent",
- "telos-parser",
- "telos-router",
-]
-
-[[package]]
-name = "telos-ir"
-version = "0.1.0"
-dependencies = [
- "telos-parser",
-]
-
-[[package]]
-name = "telos-lsp"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "telos-agent",
- "telos-codegen",
- "telos-ir",
- "telos-parser",
- "telos-router",
- "telos-verifier",
-]
-
-[[package]]
-name = "telos-parser"
-version = "0.1.0"
-
-[[package]]
-name = "telos-router"
-version = "0.1.0"
-dependencies = [
- "telos-parser",
-]
-
-[[package]]
-name = "telos-verifier"
-version = "0.1.0"
-dependencies = [
- "telos-ir",
- "telos-parser",
-]
-
-[[package]]
 name = "tinystr"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -615,6 +540,81 @@ checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
  "zerovec",
+]
+
+[[package]]
+name = "tpt-telos"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "tpt-telos-agent",
+ "tpt-telos-codegen",
+ "tpt-telos-ir",
+ "tpt-telos-lsp",
+ "tpt-telos-parser",
+ "tpt-telos-router",
+ "tpt-telos-verifier",
+]
+
+[[package]]
+name = "tpt-telos-agent"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tpt-telos-ir",
+ "tpt-telos-parser",
+ "tpt-telos-router",
+ "tpt-telos-verifier",
+ "ureq",
+]
+
+[[package]]
+name = "tpt-telos-codegen"
+version = "0.1.0"
+dependencies = [
+ "tpt-telos-agent",
+ "tpt-telos-parser",
+ "tpt-telos-router",
+]
+
+[[package]]
+name = "tpt-telos-ir"
+version = "0.1.0"
+dependencies = [
+ "tpt-telos-parser",
+]
+
+[[package]]
+name = "tpt-telos-lsp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tpt-telos-agent",
+ "tpt-telos-codegen",
+ "tpt-telos-ir",
+ "tpt-telos-parser",
+ "tpt-telos-router",
+ "tpt-telos-verifier",
+]
+
+[[package]]
+name = "tpt-telos-parser"
+version = "0.1.0"
+
+[[package]]
+name = "tpt-telos-router"
+version = "0.1.0"
+dependencies = [
+ "tpt-telos-parser",
+]
+
+[[package]]
+name = "tpt-telos-verifier"
+version = "0.1.0"
+dependencies = [
+ "tpt-telos-ir",
+ "tpt-telos-parser",
 ]
 
 [[package]]
