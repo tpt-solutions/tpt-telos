@@ -7,7 +7,10 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/tpt-telos-agent"
+keywords.workspace = true
+categories.workspace = true
 description = "Agentic transpiler backend for tpt-telos (StaticAgent + LLM agent)"
 
 [features]
