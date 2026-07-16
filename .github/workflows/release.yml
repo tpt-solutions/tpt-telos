@@ -74,7 +74,7 @@ jobs:
           for crate in tpt-telos-parser tpt-telos-ir tpt-telos-router tpt-telos-verifier \
                        tpt-telos-agent tpt-telos-codegen tpt-telos-lsp tpt-telos; do
             echo "::group::Publishing $crate"
-            cargo publish -p "$crate" --no-verify
+            cargo publish -p "$crate"
             echo "::endgroup::"
             # Let the crates.io index propagate before the next dependent publish.
             sleep 30

@@ -26,6 +26,13 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # Only tpt-telos-parser has zero internal workspace dependencies, so it's the one
+      # crate `cargo publish --dry-run` can check pre-release: for every other crate,
+      # cargo needs to resolve its path-deps' `version` against the *real* crates.io
+      # index, which only succeeds once those sibling crates are actually published
+      # there (see release.yml, which publishes them for real, in dependency order).
+      - name: Verify crates.io packaging (dry run)
+        run: cargo publish -p tpt-telos-parser --dry-run --allow-dirty
 
   coverage:
     name: Coverage (cargo llvm-cov)
