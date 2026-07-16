@@ -41,6 +41,26 @@ pub struct FuncReport {
 
 /// Analyse a document, producing one report per function, or a parse/extraction
 /// error string.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_lsp::analysis::analyze;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         { mutate state { w.balance += amount } }
+///     }
+/// "#;
+///
+/// let reports = analyze(src).unwrap();
+/// assert_eq!(reports.len(), 1);
+/// assert_eq!(reports[0].name, "deposit");
+/// assert!(reports[0].verified);
+/// ```
 pub fn analyze(text: &str) -> Result<Vec<FuncReport>, String> {
     let modules = parse(text)?;
     let problems = tpt_telos_ir::extract(&modules)?;
@@ -86,6 +106,35 @@ pub fn analyze(text: &str) -> Result<Vec<FuncReport>, String> {
 /// Produce diagnostics for a document: parse errors, and unsatisfied contracts.
 /// Ejected functions are trusted opaque blocks, so their internal verification
 /// is reported as an informational note rather than an error.
+///
+/// # Examples
+///
+/// A correct implementation produces no diagnostics:
+///
+/// ```
+/// use tpt_telos_lsp::analysis::diagnostics;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         { mutate state { w.balance += amount } }
+///     }
+/// "#;
+///
+/// assert!(diagnostics(src).is_empty());
+/// ```
+///
+/// A parse error yields one error diagnostic:
+///
+/// ```
+/// use tpt_telos_lsp::analysis::{diagnostics, SEVERITY_ERROR};
+///
+/// let diags = diagnostics("module {");
+/// assert!(!diags.is_empty());
+/// assert_eq!(diags[0].severity, SEVERITY_ERROR);
+/// ```
 pub fn diagnostics(text: &str) -> Vec<Diagnostic> {
     match analyze(text) {
         Err(e) => {
@@ -129,6 +178,29 @@ pub fn diagnostics(text: &str) -> Vec<Diagnostic> {
 
 /// Markdown hover text for the identifier at `(line, character)`, if it names a
 /// function (or the cursor is on a function's definition line).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_lsp::analysis::hover_markdown;
+///
+/// let src = "module M {\n    func noop(w: Wallet) ;\n}";
+///
+/// // Line 1 (0-based), column 9 is within "noop".
+/// let md = hover_markdown(src, 1, 9);
+/// assert!(md.is_some());
+/// let text = md.unwrap();
+/// assert!(text.contains("noop"));
+/// ```
+///
+/// Returns `None` when the cursor is not over a known function:
+///
+/// ```
+/// use tpt_telos_lsp::analysis::hover_markdown;
+///
+/// let md = hover_markdown("module M {}", 0, 0);
+/// assert!(md.is_none());
+/// ```
 pub fn hover_markdown(text: &str, line: usize, character: usize) -> Option<String> {
     let reports = analyze(text).ok()?;
     let word = word_at(text, line, character);

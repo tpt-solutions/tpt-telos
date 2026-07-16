@@ -24,7 +24,7 @@ pub mod static_agent;
 #[cfg(feature = "llm")]
 pub mod llm_agent;
 
-pub use static_agent::StaticAgent;
+pub use static_agent::{synthesize_from_ensures, StaticAgent};
 
 use tpt_telos_ir::{extract, VerificationProblem};
 use tpt_telos_parser::ast::*;
@@ -32,6 +32,20 @@ use tpt_telos_verifier::{counterexample, verify, Model, VerificationResult};
 
 /// An owned view of a single function's verification intent, detached from the
 /// surrounding module so agents can be reasoned about in isolation.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::FuncSpec;
+///
+/// let modules = parse("module M { func f(x: T) ; }").unwrap();
+/// let m = &modules[0];
+/// if let tpt_telos_parser::ast::Item::Func(func) = &m.items[0] {
+///     let spec = FuncSpec::new(m.attributes.clone(), func.clone());
+///     assert_eq!(spec.func.name, "f");
+/// }
+/// ```
 #[derive(Clone)]
 pub struct FuncSpec {
     pub module_attrs: Vec<Attribute>,
@@ -46,6 +60,15 @@ impl FuncSpec {
 
 /// A candidate implementation produced by an agent: the statements that form
 /// the function body.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_agent::Candidate;
+///
+/// let empty = Candidate { stmts: vec![] };
+/// assert!(empty.stmts.is_empty());
+/// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct Candidate {
     pub stmts: Vec<Stmt>,
@@ -128,6 +151,30 @@ fn find_counterexample(
 }
 
 /// Run the agentic transpilation loop for a single function.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{transpile_func, StaticAgent};
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let agent = StaticAgent::new();
+/// // index 0 is the invariant; index 1 is the `deposit` function
+/// let outcome = transpile_func(&modules[0], 1, &agent).unwrap();
+///
+/// assert_eq!(outcome.func_name, "deposit");
+/// assert!(outcome.verified);
+/// ```
 pub fn transpile_func(
     module: &Module,
     func_idx: usize,
@@ -230,6 +277,28 @@ pub fn transpile_func(
 }
 
 /// Convenience: transpile every function in a module and collect outcomes.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{transpile_module, StaticAgent};
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let outcomes = transpile_module(&modules[0], &StaticAgent::new()).unwrap();
+///
+/// assert_eq!(outcomes.len(), 1);
+/// assert!(outcomes[0].verified);
+/// ```
 pub fn transpile_module(
     module: &Module,
     agent: &dyn CodeAgent,
@@ -245,6 +314,26 @@ pub fn transpile_module(
 
 /// Convenience helper used by codegen: render a [`Candidate`] body back into
 /// source text via the parser's pretty-printer.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{StaticAgent, transpile_module, render_candidate};
+///
+/// let src = r#"
+///     module M {
+///         func noop(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let outcomes = transpile_module(&modules[0], &StaticAgent::new()).unwrap();
+/// let text = render_candidate(&outcomes[0].final_candidate);
+/// assert!(text.contains("w.balance"));
+/// ```
 pub fn render_candidate(c: &Candidate) -> String {
     let mut s = String::new();
     for stmt in &c.stmts {

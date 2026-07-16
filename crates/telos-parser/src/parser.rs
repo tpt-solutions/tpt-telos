@@ -45,6 +45,17 @@ impl Parser {
 
     // ---- program ----
 
+    /// Parse a full source string into a list of modules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_parser::parser::Parser;
+    ///
+    /// let modules = Parser::parse_source("module M { func foo(x: T) ; }").unwrap();
+    /// assert_eq!(modules.len(), 1);
+    /// assert_eq!(modules[0].name, "M");
+    /// ```
     pub fn parse_source(src: &str) -> Result<Vec<Module>, String> {
         let tokens = lex(src)?;
         let mut p = Parser::new(tokens);
@@ -383,6 +394,36 @@ impl Parser {
 }
 
 /// Convenience: parse a full source string into a list of modules.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             requires amount > 0
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// assert_eq!(modules.len(), 1);
+/// assert_eq!(modules[0].name, "Bank");
+/// assert_eq!(modules[0].items.len(), 2); // Wallet invariant + deposit func
+/// ```
+///
+/// Parse errors return an `Err`:
+///
+/// ```
+/// use tpt_telos_parser::parse;
+///
+/// assert!(parse("module {").is_err());
+/// ```
 pub fn parse(src: &str) -> Result<Vec<Module>, String> {
     Parser::parse_source(src)
 }

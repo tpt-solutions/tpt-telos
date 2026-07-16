@@ -108,6 +108,34 @@ pub(crate) fn analyze_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Func
 /// `bodies` supplies the final (verified) body for each function, keyed by
 /// `"<module>.<func>"`. A function absent from the map falls back to its body
 /// in the parsed source.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{StaticAgent, transpile_module};
+/// use tpt_telos_codegen::generate_program;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let agent = StaticAgent::new();
+/// let outcomes: Vec<_> = modules.iter()
+///     .flat_map(|m| transpile_module(m, &agent).unwrap())
+///     .collect();
+///
+/// let rust_src = generate_program(&modules, &outcomes);
+///
+/// assert!(rust_src.contains("pub struct Wallet"));
+/// assert!(rust_src.contains("pub fn deposit"));
+/// ```
 pub fn generate_program(modules: &[Module], outcomes: &[FuncOutcome]) -> String {
     let bodies = collect_bodies(outcomes);
     let refs: Vec<&Module> = modules.iter().collect();

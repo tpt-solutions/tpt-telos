@@ -225,6 +225,34 @@ fn pretty(expr: &Expr) -> String {
 }
 
 /// Extract all verification problems from a parsed program.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_ir::extract;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             requires amount > 0
+///             ensures w.balance == old(w.balance) + amount
+///         { mutate state { w.balance += amount } }
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let problems = extract(&modules).unwrap();
+///
+/// assert_eq!(problems.len(), 1);
+/// assert_eq!(problems[0].func_name, "deposit");
+/// // Premises include the requires clause and the entry invariant.
+/// assert!(!problems[0].premises.is_empty());
+/// // Conclusions include the ensures clause and the exit invariant.
+/// assert!(!problems[0].conclusions.is_empty());
+/// ```
 pub fn extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String> {
     let mut invariants: HashMap<String, &Invariant> = HashMap::new();
     // Fields declared by each invariant-bearing type, derived from the bare

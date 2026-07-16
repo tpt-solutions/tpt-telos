@@ -96,6 +96,22 @@ fn merge_keys(a: &HashMap<String, i128>, b: &HashMap<String, i128>) -> Vec<Strin
 }
 
 /// Returns true iff the constraint set is unsatisfiable (over the reals).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::unsat;
+///
+/// // x >= 1  and  x <= 0  is a contradiction.
+/// let ge1 = Constraint(Linear::var("x").sub(&Linear::constant_only(1)), Relation::Ge);
+/// let le0 = Constraint(Linear::var("x"), Relation::Le);
+/// assert!(unsat(&[ge1, le0]));
+///
+/// // x >= 0  alone is satisfiable.
+/// let ge0 = Constraint(Linear::var("x"), Relation::Ge);
+/// assert!(!unsat(&[ge0]));
+/// ```
 pub fn unsat(cs: &[Constraint]) -> bool {
     let mut ineqs = to_inequalities(cs);
 
@@ -178,6 +194,22 @@ fn negate(concl: &Constraint) -> Vec<Vec<Constraint>> {
 }
 
 /// Does `premises` entail `conclusion`?
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::entails;
+///
+/// // Given x >= 5, we can prove x >= 3.
+/// let x_ge5 = Constraint(Linear::var("x").sub(&Linear::constant_only(5)), Relation::Ge);
+/// let x_ge3 = Constraint(Linear::var("x").sub(&Linear::constant_only(3)), Relation::Ge);
+/// assert!(entails(&[x_ge5], &x_ge3));
+///
+/// // But x >= 0 does not entail x >= 3.
+/// let x_ge0 = Constraint(Linear::var("x"), Relation::Ge);
+/// assert!(!entails(&[x_ge0], &x_ge3));
+/// ```
 pub fn entails(premises: &[Constraint], concl: &Constraint) -> bool {
     for branch in negate(concl) {
         let mut combined: Vec<Constraint> = premises.to_vec();
@@ -200,6 +232,20 @@ pub fn entails(premises: &[Constraint], concl: &Constraint) -> bool {
 
 /// A model maps variable names to integer values that satisfy a given
 /// constraint set (when one exists).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::model;
+///
+/// // x >= 3  and  x <= 5  →  model should assign x a value in [3, 5]
+/// let ge3 = Constraint(Linear::var("x").sub(&Linear::constant_only(3)), Relation::Ge);
+/// let le5 = Constraint(Linear::var("x").sub(&Linear::constant_only(5)), Relation::Le);
+/// let m = model(&[ge3, le5]).expect("satisfiable");
+/// let x = m["x"];
+/// assert!(x >= 3 && x <= 5);
+/// ```
 pub type Model = std::collections::HashMap<String, i64>;
 
 #[derive(Clone, Copy)]
@@ -262,6 +308,25 @@ fn eval(coeffs: &HashMap<String, i128>, model: &Model) -> i128 {
 /// Uses Fourier-Motzkin variable elimination and reconstructs an integer
 /// assignment from the derived bounds. Returns `None` if the system is
 /// unsatisfiable (over the reals, hence over the integers).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::model;
+///
+/// // x >= 2  and  x <= 4  →  some value in [2, 4]
+/// let ge2 = Constraint(Linear::var("x").sub(&Linear::constant_only(2)), Relation::Ge);
+/// let le4 = Constraint(Linear::var("x").sub(&Linear::constant_only(4)), Relation::Le);
+/// let m = model(&[ge2, le4]).expect("satisfiable");
+/// let x = m["x"];
+/// assert!(x >= 2 && x <= 4);
+///
+/// // Contradictory constraints → no model.
+/// let ge1 = Constraint(Linear::var("x").sub(&Linear::constant_only(1)), Relation::Ge);
+/// let le0 = Constraint(Linear::var("x"), Relation::Le);
+/// assert!(model(&[ge1, le0]).is_none());
+/// ```
 pub fn model(cs: &[Constraint]) -> Option<Model> {
     let ineqs = to_inequalities(cs);
     solve_model(ineqs)
@@ -391,6 +456,24 @@ fn solve_model(ineqs: Vec<LinIneq>) -> Option<Model> {
 /// Produce a concrete counter-example (a witness model) showing that
 /// `conclusion` does *not* follow from `premises`. Returns `None` when the
 /// conclusion is actually entailed (no counter-example exists).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::counterexample;
+///
+/// // x >= 0 does not entail x >= 5; a counter-example exists.
+/// let x_ge0 = Constraint(Linear::var("x"), Relation::Ge);
+/// let x_ge5 = Constraint(Linear::var("x").sub(&Linear::constant_only(5)), Relation::Ge);
+/// let ce = counterexample(&[x_ge0], &x_ge5)
+///     .expect("counter-example exists");
+/// assert!(ce["x"] < 5);
+///
+/// // When the conclusion is entailed, no counter-example exists.
+/// let x_ge10 = Constraint(Linear::var("x").sub(&Linear::constant_only(10)), Relation::Ge);
+/// assert!(counterexample(&[x_ge10], &x_ge5).is_none());
+/// ```
 pub fn counterexample(premises: &[Constraint], concl: &Constraint) -> Option<Model> {
     for branch in negate(concl) {
         let mut cs = premises.to_vec();
@@ -404,6 +487,24 @@ pub fn counterexample(premises: &[Constraint], concl: &Constraint) -> Option<Mod
 
 /// Check whether an integer model satisfies every constraint in `cs`.
 /// Used to validate a generated counter-example before handing it to the agent.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::satisfies_model;
+/// use std::collections::HashMap;
+///
+/// // x >= 3 satisfied by x = 5
+/// let ge3 = Constraint(Linear::var("x").sub(&Linear::constant_only(3)), Relation::Ge);
+/// let mut m = HashMap::new();
+/// m.insert("x".to_string(), 5_i64);
+/// assert!(satisfies_model(&[ge3.clone()], &m));
+///
+/// // x >= 3 not satisfied by x = 1
+/// m.insert("x".to_string(), 1_i64);
+/// assert!(!satisfies_model(&[ge3], &m));
+/// ```
 pub fn satisfies_model(cs: &[Constraint], model: &Model) -> bool {
     let ineqs = to_inequalities(cs);
     for ineq in &ineqs {

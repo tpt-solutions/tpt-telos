@@ -11,6 +11,24 @@
 
 use tpt_telos_parser::ast::{Arg, Attribute};
 
+/// The compilation backend a module or function is routed to.
+///
+/// Determined by `@boundary(...)` architectural metadata.
+/// Defaults to [`Target::Rust`] when no recognised flags are present.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_router::{route, Target};
+/// use tpt_telos_parser::ast::{Arg, Attribute};
+///
+/// let attr = Attribute {
+///     name: "boundary".to_string(),
+///     args: vec![Arg::Flag("network_io".to_string())],
+/// };
+/// let r = route(&[attr]);
+/// assert_eq!(r.target, Target::Go);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Rust,
@@ -18,6 +36,16 @@ pub enum Target {
 }
 
 impl Target {
+    /// Returns the target as a lowercase string: `"rust"` or `"go"`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_router::Target;
+    ///
+    /// assert_eq!(Target::Rust.as_str(), "rust");
+    /// assert_eq!(Target::Go.as_str(), "go");
+    /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             Target::Rust => "rust",
@@ -26,6 +54,10 @@ impl Target {
     }
 }
 
+/// The routing decision for a module or function.
+///
+/// Contains the chosen [`Target`] backend and a human-readable `reason`
+/// string for transparency in CLI output.
 #[derive(Debug, Clone)]
 pub struct Route {
     pub target: Target,
@@ -34,6 +66,22 @@ pub struct Route {
 }
 
 impl Route {
+    /// Returns `true` when the target is [`Target::Rust`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_router::{route, Target};
+    /// use tpt_telos_parser::ast::{Arg, Attribute};
+    ///
+    /// let cpu_attr = Attribute {
+    ///     name: "boundary".to_string(),
+    ///     args: vec![Arg::Flag("cpu_bound".to_string())],
+    /// };
+    /// let r = route(&[cpu_attr]);
+    /// assert!(r.is_rust());
+    /// assert_eq!(r.target, Target::Rust);
+    /// ```
     pub fn is_rust(&self) -> bool {
         self.target == Target::Rust
     }
@@ -67,6 +115,33 @@ fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
 
 /// Route a module from its own `@boundary` attributes (and any inherited
 /// function-level attributes if supplied).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_router::{route, Target};
+/// use tpt_telos_parser::ast::{Arg, Attribute};
+///
+/// // No boundary flags → Rust (default).
+/// assert_eq!(route(&[]).target, Target::Rust);
+///
+/// // cpu_bound → Rust.
+/// let rust_attr = Attribute {
+///     name: "boundary".to_string(),
+///     args: vec![Arg::Flag("cpu_bound".to_string())],
+/// };
+/// assert_eq!(route(&[rust_attr]).target, Target::Rust);
+///
+/// // network_io → Go.
+/// let go_attr = Attribute {
+///     name: "boundary".to_string(),
+///     args: vec![Arg::Flag("network_io".to_string())],
+/// };
+/// let r = route(&[go_attr]);
+/// assert_eq!(r.target, Target::Go);
+/// assert!(!r.is_rust());
+/// assert!(r.reason.contains("network_io"));
+/// ```
 pub fn route(attrs: &[Attribute]) -> Route {
     let flags = boundary_flags(attrs);
 

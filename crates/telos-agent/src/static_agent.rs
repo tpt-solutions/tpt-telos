@@ -15,6 +15,21 @@ use tpt_telos_parser::ast::*;
 
 use crate::{Candidate, CodeAgent, FuncSpec, Model};
 
+/// The default, fully offline code-generation agent for tpt-telos.
+///
+/// When the developer supplies a function body, `StaticAgent` uses it as the
+/// first candidate. When the body is elided (`func ... ;`), it synthesizes one
+/// directly from the `ensures` clauses. Rewriting is guided by the
+/// counter-example returned by the solver.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_agent::{CodeAgent, StaticAgent};
+///
+/// let agent = StaticAgent::new();
+/// assert_eq!(agent.name(), "static-synth");
+/// ```
 pub struct StaticAgent;
 
 impl StaticAgent {
@@ -199,6 +214,31 @@ fn apply_fixes(stmts: &mut [Stmt], fixes: &HashMap<(String, String), Expr>) {
 /// `lhs == rhs` where `lhs` is a field access becomes a `mutate state`
 /// assignment; a clause of the form `var == rhs` (a scalar output) becomes a
 /// local binding that is returned.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{FuncSpec, StaticAgent};
+/// use tpt_telos_agent::synthesize_from_ensures;
+///
+/// let src = r#"
+///     module M {
+///         func transfer(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) - amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let m = &modules[0];
+/// if let tpt_telos_parser::ast::Item::Func(func) = &m.items[0] {
+///     let spec = FuncSpec::new(m.attributes.clone(), func.clone());
+///     let candidate = synthesize_from_ensures(&spec);
+///     // A body was derived from the ensures clause.
+///     assert!(!candidate.stmts.is_empty());
+/// }
+/// ```
 pub fn synthesize_from_ensures(spec: &FuncSpec) -> Candidate {
     let mut field_assigns: Vec<Assign> = Vec::new();
     let mut var_assigns: Vec<Assign> = Vec::new();
