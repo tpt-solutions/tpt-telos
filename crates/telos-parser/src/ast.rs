@@ -11,6 +11,16 @@ pub enum Type {
 }
 
 impl Type {
+    /// Return the name of this type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_parser::ast::Type;
+    ///
+    /// let ty = Type::Named("Wallet".to_string());
+    /// assert_eq!(ty.name(), "Wallet");
+    /// ```
     pub fn name(&self) -> &str {
         match self {
             Type::Named(s) => s,
@@ -52,6 +62,16 @@ pub enum Item {
 }
 
 impl Item {
+    /// Return the name of this item (function name or invariant type name).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_parser::parse;
+    ///
+    /// let modules = parse("module M { func foo(x: T) ; }").unwrap();
+    /// assert_eq!(modules[0].items[0].func_name(), "foo");
+    /// ```
     pub fn func_name(&self) -> String {
         match self {
             Item::Func(f) => f.name.clone(),
@@ -92,12 +112,33 @@ pub struct Func {
 impl Func {
     /// Whether this function is "ejected" -- its body is a trusted opaque block
     /// and only its outer contracts are enforced (at the boundary).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_parser::parse;
+    ///
+    /// let src = r#"
+    ///     module M {
+    ///         @eject(rust)
+    ///         func compute(x: T) ;
+    ///     }
+    /// "#;
+    /// let modules = parse(src).unwrap();
+    /// let item = &modules[0].items[0];
+    /// if let tpt_telos_parser::ast::Item::Func(f) = item {
+    ///     assert!(f.is_ejected());
+    ///     assert_eq!(f.eject_lang(), Some("rust"));
+    /// }
+    /// ```
     pub fn is_ejected(&self) -> bool {
         self.attributes.iter().any(|a| a.name == "eject")
     }
 
     /// The explicit eject target language, if given as `@eject(rust)` /
     /// `@eject(go)`.
+    ///
+    /// See [`Func::is_ejected`] for an example.
     pub fn eject_lang(&self) -> Option<&str> {
         for a in &self.attributes {
             if a.name == "eject" {

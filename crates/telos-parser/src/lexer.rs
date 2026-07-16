@@ -87,6 +87,25 @@ impl fmt::Display for Token {
 
 pub type Spanned = (Token, usize, usize);
 
+/// Tokenize a tpt-telos source string into a list of spanned tokens.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::lexer::lex;
+///
+/// let tokens = lex("module M {}").unwrap();
+/// // The result includes a final Eof sentinel.
+/// assert!(!tokens.is_empty());
+/// ```
+///
+/// Returns an error on unrecognised characters:
+///
+/// ```
+/// use tpt_telos_parser::lexer::lex;
+///
+/// assert!(lex("module M { # }").is_err());
+/// ```
 pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
     let chars: Vec<char> = src.chars().collect();
     let mut i = 0usize;

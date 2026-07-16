@@ -35,6 +35,16 @@ impl Default for Server {
 }
 
 impl Server {
+    /// Create a new, idle language server instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_lsp::Server;
+    ///
+    /// let server = Server::new();
+    /// assert!(!server.should_exit());
+    /// ```
     pub fn new() -> Self {
         Server {
             documents: HashMap::new(),
@@ -44,12 +54,60 @@ impl Server {
     }
 
     /// Whether the client has requested the server to exit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_lsp::Server;
+    /// use serde_json::json;
+    ///
+    /// let mut server = Server::new();
+    /// assert!(!server.should_exit());
+    ///
+    /// server.handle(&json!({ "jsonrpc": "2.0", "id": 1, "method": "shutdown" }));
+    /// assert!(!server.should_exit()); // shutdown sets internal flag, not exit yet
+    ///
+    /// server.handle(&json!({ "jsonrpc": "2.0", "method": "exit" }));
+    /// assert!(server.should_exit());
+    /// ```
     pub fn should_exit(&self) -> bool {
         self.exit
     }
 
     /// Handle one incoming JSON-RPC message, returning zero or more outgoing
     /// messages (responses and/or notifications) to write back to the client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tpt_telos_lsp::Server;
+    /// use serde_json::json;
+    ///
+    /// let mut server = Server::new();
+    ///
+    /// // Initialize: the server responds with its capability advertisement.
+    /// let responses = server.handle(&json!({
+    ///     "jsonrpc": "2.0",
+    ///     "id": 1,
+    ///     "method": "initialize",
+    ///     "params": {}
+    /// }));
+    /// assert_eq!(responses.len(), 1);
+    /// assert!(responses[0]["result"]["capabilities"]["hoverProvider"].as_bool().unwrap());
+    ///
+    /// // Open a document: the server publishes diagnostics.
+    /// let responses = server.handle(&json!({
+    ///     "jsonrpc": "2.0",
+    ///     "method": "textDocument/didOpen",
+    ///     "params": {
+    ///         "textDocument": {
+    ///             "uri": "file:///test.telos",
+    ///             "text": "module M {}"
+    ///         }
+    ///     }
+    /// }));
+    /// assert_eq!(responses[0]["method"], "textDocument/publishDiagnostics");
+    /// ```
     pub fn handle(&mut self, msg: &Value) -> Vec<Value> {
         let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
         let id = msg.get("id").cloned();
@@ -277,6 +335,27 @@ fn publish_diagnostics(uri: &str, diags: &[Diagnostic]) -> Value {
 // ------------------------------------------------------------- stdio loop
 
 /// Run the language server over stdio until the client sends `exit`.
+///
+/// # Examples
+///
+/// `run_stdio` is designed to be the entry point of a long-running LSP server
+/// process. In production it is called from `main`:
+///
+/// ```no_run
+/// tpt_telos_lsp::run_stdio().unwrap();
+/// ```
+///
+/// For programmatic use without a full stdio loop, drive [`Server`] directly:
+///
+/// ```
+/// use tpt_telos_lsp::Server;
+/// use serde_json::json;
+///
+/// let mut server = Server::new();
+/// let _ = server.handle(&json!({
+///     "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+/// }));
+/// ```
 pub fn run_stdio() -> std::io::Result<()> {
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();

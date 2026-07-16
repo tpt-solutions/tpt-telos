@@ -29,6 +29,35 @@ use crate::{collect_bodies, ffi, go, render_rust};
 pub const GO_PACKAGE: &str = "gosvc";
 
 /// A single generated file, addressed by a path relative to the project root.
+///
+/// # Examples
+///
+/// A `GeneratedFile` is produced by [`generate_project`]; you typically inspect
+/// it by path:
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{StaticAgent, transpile_module};
+/// use tpt_telos_codegen::generate_project;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let outcomes: Vec<_> = modules.iter()
+///     .flat_map(|m| transpile_module(m, &StaticAgent::new()).unwrap())
+///     .collect();
+///
+/// let project = generate_project(&modules, &outcomes);
+/// let lib = project.files.iter().find(|f| f.path == "rust/src/lib.rs").unwrap();
+/// assert!(lib.contents.contains("pub struct Wallet"));
+/// ```
 #[derive(Debug, Clone)]
 pub struct GeneratedFile {
     pub path: String,
@@ -46,6 +75,32 @@ pub struct Project {
 
 impl Project {
     /// Write every generated file under `root`, creating directories as needed.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use tpt_telos_parser::parse;
+    /// use tpt_telos_agent::{StaticAgent, transpile_module};
+    /// use tpt_telos_codegen::generate_project;
+    ///
+    /// let src = r#"
+    ///     module Bank {
+    ///         invariant Wallet { balance >= 0 }
+    ///         func deposit(w: Wallet, amount: PositiveInt)
+    ///             ensures w.balance == old(w.balance) + amount
+    ///         ;
+    ///     }
+    /// "#;
+    ///
+    /// let modules = parse(src).unwrap();
+    /// let outcomes: Vec<_> = modules.iter()
+    ///     .flat_map(|m| transpile_module(m, &StaticAgent::new()).unwrap())
+    ///     .collect();
+    ///
+    /// let project = generate_project(&modules, &outcomes);
+    /// project.write(std::path::Path::new("/tmp/my_bank_project")).unwrap();
+    /// // Writes rust/src/lib.rs, rust/Cargo.toml, and go/service.go etc.
+    /// ```
     pub fn write(&self, root: &Path) -> io::Result<()> {
         for f in &self.files {
             let full = root.join(&f.path);
@@ -59,6 +114,33 @@ impl Project {
 }
 
 /// Assemble the dual-backend project for a program.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_parser::parse;
+/// use tpt_telos_agent::{StaticAgent, transpile_module};
+/// use tpt_telos_codegen::generate_project;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func deposit(w: Wallet, amount: PositiveInt)
+///             ensures w.balance == old(w.balance) + amount
+///         ;
+///     }
+/// "#;
+///
+/// let modules = parse(src).unwrap();
+/// let outcomes: Vec<_> = modules.iter()
+///     .flat_map(|m| transpile_module(m, &StaticAgent::new()).unwrap())
+///     .collect();
+///
+/// let project = generate_project(&modules, &outcomes);
+/// // A Rust-only program (no @boundary(network_io) etc.) only produces Rust output.
+/// assert!(project.has_rust);
+/// assert!(!project.has_ffi);
+/// ```
 pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project {
     let bodies = collect_bodies(outcomes);
 
