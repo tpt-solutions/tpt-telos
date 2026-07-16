@@ -7,7 +7,10 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/tpt-telos-router"
 description = "Context router that classifies tpt-telos modules to Rust or Go backends"
 
 [dependencies]
