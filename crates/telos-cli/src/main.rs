@@ -16,7 +16,7 @@ use std::fs;
 use std::process::ExitCode;
 
 use tpt_telos_agent::{transpile_module, StaticAgent};
-use tpt_telos_codegen::{generate_program, generate_project};
+use tpt_telos_codegen::{generate_program, generate_project, proof};
 use tpt_telos_parser::ast::*;
 use tpt_telos_parser::parse;
 use tpt_telos_verifier::verify;
@@ -234,7 +234,12 @@ fn run_verify(file: &str) -> Result<bool, String> {
         for check in &result.checks {
             let tag = if check.passed { "PASS" } else { "FAIL" };
             let kind = if check.is_ensures { "ensures " } else { "" };
-            println!("    [{}] {}{}", tag, kind, check.description);
+            let approx = if check.is_approximation {
+                " [interval-bounded]"
+            } else {
+                ""
+            };
+            println!("    [{}] {}{}{}", tag, kind, check.description, approx);
             if !check.passed {
                 overall = false;
             }
@@ -331,6 +336,8 @@ fn run_transpile(file: &str, llm: bool, out: Option<String>) -> Result<(), Strin
 }
 
 fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
+    let src_bytes =
+        fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
     let agent = make_agent(llm)?;
 
@@ -345,7 +352,13 @@ fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
         }
     }
 
-    let rust = generate_program(&modules, &outcomes);
+    // Generate proof manifest before appending the static to the Rust source.
+    let manifest = proof::generate_manifest(&src_bytes, &outcomes);
+    let proof_static = proof::render_rust_proof_static(&manifest);
+
+    let mut rust = generate_program(&modules, &outcomes);
+    rust.push_str(&proof_static);
+
     let crate_dir = std::path::Path::new(out_dir);
     fs::create_dir_all(crate_dir.join("src"))
         .map_err(|e| format!("cannot create {out_dir}: {e}"))?;
@@ -358,7 +371,13 @@ fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
     )
     .map_err(|e| format!("cannot write Cargo.toml: {e}"))?;
 
+    // Write proof manifest alongside generated code.
+    let proof_json = proof::to_json(&manifest);
+    fs::write(crate_dir.join("telos-proof.json"), &proof_json)
+        .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
+
     println!("Generated crate written to {out_dir}/");
+    println!("Proof manifest written → {out_dir}/telos-proof.json");
     if !all_verified {
         println!("WARNING: some functions were not mathematically verified.");
     }
@@ -388,6 +407,8 @@ fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
 }
 
 fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool, String> {
+    let src_bytes =
+        fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
     let agent = make_agent(llm)?;
 
@@ -412,6 +433,12 @@ fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool
     }
 
     let project = generate_project(&modules, &outcomes);
+
+    // Surface routing diagnostics as warnings.
+    for diag in &project.diagnostics {
+        eprintln!("WARNING [{}] {}", format!("{:?}", diag.kind).to_lowercase(), diag.message);
+    }
+
     let root = std::path::Path::new(out_dir);
     project
         .write(root)
@@ -420,14 +447,22 @@ fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool
         canonicalize_go(&root.join("go"));
     }
 
+    // Write proof manifest.
+    let manifest = proof::generate_manifest(&src_bytes, &outcomes);
+    let proof_json = proof::to_json(&manifest);
+    fs::write(root.join("telos-proof.json"), &proof_json)
+        .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
+
     println!("\nProject written to {out_dir}/");
     for f in &project.files {
         println!("  {}", f.path);
     }
+    println!("  telos-proof.json");
     println!(
-        "\nBackends: rust={} go={} ffi_bridge={}",
-        project.has_rust, project.has_go, project.has_ffi
+        "\nBackends: rust={} go={} python={} ffi_bridge={}",
+        project.has_rust, project.has_go, project.has_python, project.has_ffi
     );
+    println!("Proof manifest written → {out_dir}/telos-proof.json");
     if !all_verified {
         println!("WARNING: some functions were not mathematically verified.");
     }

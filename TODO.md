@@ -104,6 +104,26 @@
 > (both backends compile; Go gofmt-clean), and the LSP server (11 tests +
 > live stdio smoke test) reports diagnostics, hover, verify, and eject preview.
 
+## Phase 5: Verifier Hardening & Platform Extensions
+
+- [ ] **Nonlinear interval bounding** — over-approximate `x * y` contracts via interval arithmetic when both variables have bounds in `requires` clauses; mark results `[interval-bounded]` in verify output. (`crates/telos-ir/src/extract.rs`, `crates/telos-verifier/src/verify.rs`)
+- [ ] **Python/JAX codegen target** — `@boundary(ml_training|python|jax)` routes to a Python backend that emits `@dataclass` structs with `satisfies_invariants()` and runtime `assert` guards for all contracts; JAX flag emits `jnp.int64` type annotations. (`crates/telos-codegen/src/python.rs`, `crates/telos-router/src/lib.rs`)
+- [ ] **Real-time routing guard** — detect `@boundary(real_time)` or `@boundary(zero_allocation)` modules routed to Go (GC-based, non-deterministic) and emit `WARNING [real_time_go_conflict]`; `--strict-rt` flag exits non-zero. (`crates/telos-router/src/lib.rs`, `crates/telos-cli/src/main.rs`)
+- [ ] **Cryptographic proof manifest** — generate `telos-proof.json` (SHA-256 of source, per-function verification outcomes, tamper-evident `manifest_hash`) on every `build`/`project` run, and embed it as `#[used] static TELOS_PROOF_MANIFEST` in generated Rust binary (spec §7). (`crates/telos-codegen/src/proof.rs`)
+- [ ] **Language feature matrix** — document supported/partial/unsupported constructs in `grammar.ebnf` and `README.md`; eliminates ambiguity for integrators writing FADEC-level control logic.
+
+## Phase 6: Scale, Precision & Language Completeness (not yet started)
+
+- [ ] **Distributed SMT solver cluster** — gRPC-based `VerificationProblem` dispatch to a pool of solver workers; enables CI/CV verification at scale without single-machine bottlenecks.
+- [ ] **Z3/CVC5 optional backend** — behind a `--solver z3` flag; falls back to built-in Fourier-Motzkin when unavailable; provides exact nonlinear arithmetic for contracts that interval bounding cannot verify.
+- [ ] **Production coverage lift** — raise workspace line coverage from ~80% to 90%+ using proptest (property-based) and cargo-fuzz (fuzz) harnesses; add mutation testing (cargo-mutants).
+- [ ] **Go GC determinism formal documentation** — document in `ARCHITECTURE.md` exactly which Go-routed module classes are safe vs. unsafe for hard real-time; wire into the `real_time` routing guard as an informational reference.
+- [ ] **Disjunction (`||`) in premises** — currently parsed but rejected at the IR level; implement DNF normalization so `requires a || b` expands into two verification sub-problems, each solved independently.
+- [ ] **Floating-point types** — `Float32`/`Float64` refinement types; IR lowering uses IEEE 754 interval arithmetic; verifier tracks rounding error bounds.
+- [ ] **`@state(...)` semantics** — `@state(persistent)` / `@state(ephemeral)` currently parsed but ignored; implement storage-class semantics in the router and codegen (e.g., `persistent` → database-backed struct, `ephemeral` → stack-only).
+- [ ] **Array and slice support** — `[T; N]` fixed arrays and `[T]` slices in type positions; IR constraint extraction for length/index invariants; codegen for Rust `[T; N]` and Go `[N]T`.
+- [ ] **Cross-module references** — allow one module's invariant types to appear in another module's function signatures; requires a global type resolution pass over `Vec<Module>` before IR lowering.
+
 ## Status: tpt-telos v1.0 — all four phases complete.
 
 The full pipeline is in place: parser -> IR/constraint extraction -> SMT-style

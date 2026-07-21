@@ -33,10 +33,14 @@ use tpt_telos_parser::ast::{Arg, Attribute};
 pub enum Target {
     Rust,
     Go,
+    /// Python (with optional JAX/NumPy annotations) for ML/PINN workloads.
+    /// Triggered by `@boundary(ml_training)`, `@boundary(python)`, or
+    /// `@boundary(jax)`.
+    Python,
 }
 
 impl Target {
-    /// Returns the target as a lowercase string: `"rust"` or `"go"`.
+    /// Returns the target as a lowercase string.
     ///
     /// # Examples
     ///
@@ -45,13 +49,34 @@ impl Target {
     ///
     /// assert_eq!(Target::Rust.as_str(), "rust");
     /// assert_eq!(Target::Go.as_str(), "go");
+    /// assert_eq!(Target::Python.as_str(), "python");
     /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             Target::Rust => "rust",
             Target::Go => "go",
+            Target::Python => "python",
         }
     }
+}
+
+/// A routing warning emitted when architectural flags imply a potentially
+/// unsafe target combination.
+#[derive(Debug, Clone)]
+pub struct RoutingDiagnostic {
+    pub kind: DiagnosticKind,
+    pub module: String,
+    pub message: String,
+}
+
+/// The kind of routing conflict detected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiagnosticKind {
+    /// A `real_time` module was routed to Go, whose GC is non-deterministic.
+    /// FADEC / PREEMPT_RT targets must stay on the Rust backend.
+    RealTimeGoConflict,
+    /// A `zero_allocation` module was routed to Go, which allocates via GC.
+    ZeroAllocGoConflict,
 }
 
 /// The routing decision for a module or function.
@@ -98,6 +123,9 @@ const GO_FLAGS: &[&str] = &[
     "high_latency",
 ];
 
+/// Boundary flags that imply a Python target (ML/JAX workloads).
+const PYTHON_FLAGS: &[&str] = &["ml_training", "python", "jax"];
+
 fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
     let mut flags = Vec::new();
     for attr in attrs {
@@ -113,8 +141,101 @@ fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
     flags
 }
 
+/// Route a module from its `@boundary` attributes and emit diagnostics for
+/// potentially unsafe target combinations.
+///
+/// Diagnostics are non-fatal warnings; the caller decides whether to surface
+/// them as errors (e.g. with `--strict-rt`).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_router::{route_checked, Target, DiagnosticKind};
+/// use tpt_telos_parser::ast::{Arg, Attribute};
+///
+/// let attr = Attribute {
+///     name: "boundary".to_string(),
+///     args: vec![
+///         Arg::Flag("real_time".to_string()),
+///         Arg::Flag("network_io".to_string()),
+///     ],
+/// };
+/// let (r, diags) = route_checked(&[attr], "ControlLoop");
+/// assert_eq!(r.target, Target::Go);
+/// assert!(diags.iter().any(|d| d.kind == DiagnosticKind::RealTimeGoConflict));
+/// ```
+pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<RoutingDiagnostic>) {
+    let flags = boundary_flags(attrs);
+
+    let mut go_hits = Vec::new();
+    let mut rust_hits = Vec::new();
+    let mut python_hits = Vec::new();
+    for f in &flags {
+        if PYTHON_FLAGS.contains(&f.as_str()) {
+            python_hits.push(f.clone());
+        } else if GO_FLAGS.contains(&f.as_str()) {
+            go_hits.push(f.clone());
+        } else if RUST_FLAGS.contains(&f.as_str()) {
+            rust_hits.push(f.clone());
+        }
+    }
+
+    // Python beats everything else (ML workloads are explicit opt-in).
+    let route = if !python_hits.is_empty() {
+        Route {
+            target: Target::Python,
+            reason: format!("boundary flags {:?} routed to Python backend", python_hits),
+        }
+    } else if !go_hits.is_empty() {
+        Route {
+            target: Target::Go,
+            reason: format!("boundary flags {:?} routed to Go backend", go_hits),
+        }
+    } else if !rust_hits.is_empty() {
+        Route {
+            target: Target::Rust,
+            reason: format!("boundary flags {:?} routed to Rust backend", rust_hits),
+        }
+    } else {
+        Route {
+            target: Target::Rust,
+            reason: "no explicit boundary flags; defaulting to Rust compute backend".to_string(),
+        }
+    };
+
+    let mut diagnostics = Vec::new();
+    if route.target == Target::Go {
+        if rust_hits.iter().any(|f| f == "real_time") {
+            diagnostics.push(RoutingDiagnostic {
+                kind: DiagnosticKind::RealTimeGoConflict,
+                module: module_name.to_string(),
+                message: format!(
+                    "module `{}` has `real_time` flag but is routed to Go (GC is \
+                     non-deterministic; FADEC/PREEMPT_RT targets must use Rust)",
+                    module_name
+                ),
+            });
+        }
+        if rust_hits.iter().any(|f| f == "zero_allocation") {
+            diagnostics.push(RoutingDiagnostic {
+                kind: DiagnosticKind::ZeroAllocGoConflict,
+                module: module_name.to_string(),
+                message: format!(
+                    "module `{}` has `zero_allocation` flag but is routed to Go \
+                     (Go allocates via GC; zero-allocation guarantees cannot be upheld)",
+                    module_name
+                ),
+            });
+        }
+    }
+
+    (route, diagnostics)
+}
+
 /// Route a module from its own `@boundary` attributes (and any inherited
-/// function-level attributes if supplied).
+/// function-level attributes if supplied). Thin wrapper around
+/// [`route_checked`] that discards diagnostics for callers that do not need
+/// them.
 ///
 /// # Examples
 ///
@@ -141,38 +262,16 @@ fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
 /// assert_eq!(r.target, Target::Go);
 /// assert!(!r.is_rust());
 /// assert!(r.reason.contains("network_io"));
+///
+/// // ml_training → Python.
+/// let py_attr = Attribute {
+///     name: "boundary".to_string(),
+///     args: vec![Arg::Flag("ml_training".to_string())],
+/// };
+/// assert_eq!(route(&[py_attr]).target, Target::Python);
 /// ```
 pub fn route(attrs: &[Attribute]) -> Route {
-    let flags = boundary_flags(attrs);
-
-    let mut go_hits = Vec::new();
-    let mut rust_hits = Vec::new();
-    for f in &flags {
-        if GO_FLAGS.contains(&f.as_str()) {
-            go_hits.push(f.clone());
-        } else if RUST_FLAGS.contains(&f.as_str()) {
-            rust_hits.push(f.clone());
-        }
-    }
-
-    // Go backend wins when any distributed/network flag is present, otherwise
-    // Rust is the default compute backend.
-    if !go_hits.is_empty() {
-        Route {
-            target: Target::Go,
-            reason: format!("boundary flags {:?} routed to Go backend", go_hits),
-        }
-    } else if !rust_hits.is_empty() {
-        Route {
-            target: Target::Rust,
-            reason: format!("boundary flags {:?} routed to Rust backend", rust_hits),
-        }
-    } else {
-        Route {
-            target: Target::Rust,
-            reason: "no explicit boundary flags; defaulting to Rust compute backend".to_string(),
-        }
-    }
+    route_checked(attrs, "").0
 }
 
 #[cfg(test)]
@@ -278,5 +377,63 @@ mod tests {
         let r = route(&[attr(&["network_io"])]);
         assert!(r.reason.contains("network_io"));
         assert!(r.is_rust() == (r.target == Target::Rust));
+    }
+
+    // ---- Python target ----
+
+    #[test]
+    fn ml_training_routes_to_python() {
+        let r = route(&[attr(&["ml_training"])]);
+        assert_eq!(r.target, Target::Python);
+    }
+
+    #[test]
+    fn python_flag_routes_to_python() {
+        let r = route(&[attr(&["python"])]);
+        assert_eq!(r.target, Target::Python);
+    }
+
+    #[test]
+    fn jax_flag_routes_to_python() {
+        let r = route(&[attr(&["jax"])]);
+        assert_eq!(r.target, Target::Python);
+    }
+
+    #[test]
+    fn python_beats_go_flag() {
+        // ml_training takes priority over network_io.
+        let r = route(&[attr(&["ml_training", "network_io"])]);
+        assert_eq!(r.target, Target::Python);
+    }
+
+    // ---- Real-time conflict diagnostics ----
+
+    #[test]
+    fn real_time_go_conflict_emits_diagnostic() {
+        let (r, diags) = route_checked(&[attr(&["real_time", "network_io"])], "ControlLoop");
+        assert_eq!(r.target, Target::Go);
+        assert!(diags.iter().any(|d| d.kind == DiagnosticKind::RealTimeGoConflict));
+    }
+
+    #[test]
+    fn zero_alloc_go_conflict_emits_diagnostic() {
+        let (r, diags) =
+            route_checked(&[attr(&["zero_allocation", "high_concurrency"])], "Buffer");
+        assert_eq!(r.target, Target::Go);
+        assert!(diags.iter().any(|d| d.kind == DiagnosticKind::ZeroAllocGoConflict));
+    }
+
+    #[test]
+    fn real_time_alone_has_no_diagnostics() {
+        let (r, diags) = route_checked(&[attr(&["real_time"])], "FADEC");
+        assert_eq!(r.target, Target::Rust);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn python_target_has_no_diagnostics() {
+        let (r, diags) = route_checked(&[attr(&["ml_training"])], "TrainLayer");
+        assert_eq!(r.target, Target::Python);
+        assert!(diags.is_empty());
     }
 }

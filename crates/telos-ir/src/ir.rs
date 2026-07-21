@@ -181,4 +181,8 @@ pub struct Conclusion {
     pub constraint: Constraint,
     /// True for post-condition `ensures`, false for a maintained invariant.
     pub is_ensures: bool,
+    /// True when interval bounding was used to linearize a nonlinear product.
+    /// The proof is sound but conservative: the constraint was replaced with a
+    /// worst-case constant derived from the variable bounds in the premises.
+    pub is_approximation: bool,
 }

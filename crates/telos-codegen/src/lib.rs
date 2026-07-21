@@ -22,6 +22,8 @@ pub mod eject;
 pub mod ffi;
 pub mod go;
 pub mod project;
+pub mod proof;
+pub mod python;
 
 pub use project::{generate_project, GeneratedFile, Project};
 

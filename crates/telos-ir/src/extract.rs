@@ -15,6 +15,10 @@ use crate::ir::*;
 use std::collections::{HashMap, HashSet};
 use tpt_telos_parser::ast::*;
 
+/// Per-variable lower and upper bounds derived from premise constraints.
+/// `None` means the bound is unknown.
+type VarBounds = HashMap<String, (Option<i64>, Option<i64>)>;
+
 type Naming = dyn Fn(&str, &str) -> String;
 
 fn pre_field(base: &str, field: &str) -> String {
@@ -90,6 +94,186 @@ fn linearize(
                 _ => Err("expected arithmetic expression".into()),
             }
         }
+    }
+}
+
+/// Scan premise constraints to extract per-variable lower and upper bounds.
+///
+/// Only single-variable constraints with coefficient ±1 are processed; multi-
+/// variable constraints are ignored because they don't isolate a single bound.
+fn collect_var_bounds(premises: &[Constraint]) -> VarBounds {
+    let mut bounds: VarBounds = HashMap::new();
+    for Constraint(lin, rel) in premises {
+        if lin.terms.len() != 1 {
+            continue;
+        }
+        let (var, coeff) = &lin.terms[0];
+        let c = lin.constant;
+        // The constraint is `coeff * var + c  rel  0`.
+        let (lo_delta, hi_delta): (Option<i64>, Option<i64>) = match (*coeff, rel) {
+            // var + c >= 0  →  var >= -c
+            (1, Relation::Ge) => (Some(-c), None),
+            // var + c > 0   →  var > -c  →  var >= -c + 1 (integers)
+            (1, Relation::Gt) => (Some(-c + 1), None),
+            // var + c <= 0  →  var <= -c
+            (1, Relation::Le) => (None, Some(-c)),
+            // var + c < 0   →  var < -c  →  var <= -c - 1
+            (1, Relation::Lt) => (None, Some(-c - 1)),
+            // -var + c >= 0  →  var <= c
+            (-1, Relation::Ge) => (None, Some(c)),
+            // -var + c > 0   →  var < c  →  var <= c - 1
+            (-1, Relation::Gt) => (None, Some(c - 1)),
+            // -var + c <= 0  →  var >= c
+            (-1, Relation::Le) => (Some(c), None),
+            // -var + c < 0   →  var > c  →  var >= c + 1
+            (-1, Relation::Lt) => (Some(c + 1), None),
+            // var + c == 0  →  var == -c  (both lo and hi)
+            (1, Relation::Eq) => (Some(-c), Some(-c)),
+            _ => continue,
+        };
+        let entry = bounds.entry(var.clone()).or_insert((None, None));
+        if let Some(lo) = lo_delta {
+            entry.0 = Some(entry.0.map_or(lo, |e: i64| e.max(lo)));
+        }
+        if let Some(hi) = hi_delta {
+            entry.1 = Some(entry.1.map_or(hi, |e: i64| e.min(hi)));
+        }
+    }
+    bounds
+}
+
+/// Look up bounds for `var`, falling back to the pre-state version when
+/// `var` is a post-state name (ends with `'`). Frame axioms make pre-state
+/// bounds valid for unmodified post-state variables.
+fn lookup_bounds<'a>(bounds: &'a VarBounds, var: &str) -> Option<&'a (Option<i64>, Option<i64>)> {
+    bounds.get(var).or_else(|| {
+        if let Some(pre) = var.strip_suffix('\'') {
+            bounds.get(pre)
+        } else {
+            None
+        }
+    })
+}
+
+/// Return the resolved variable name for a simple variable expression, or
+/// `None` for complex sub-expressions we cannot name.
+fn expr_var_name(
+    expr: &Expr,
+    field_fn: &Naming,
+    var_fn: &dyn Fn(&str) -> String,
+) -> Option<String> {
+    match expr {
+        Expr::Var(name) => Some(var_fn(name)),
+        Expr::Field { base, field } => Some(field_fn(base, field)),
+        _ => None,
+    }
+}
+
+/// Like [`linearize`] but attempts interval-arithmetic bounding for nonlinear
+/// products when both operands have known bounds in `bounds`. Sets
+/// `*approximated = true` when a product was replaced by its interval bound.
+fn linearize_bounded(
+    expr: &Expr,
+    field_fn: &Naming,
+    var_fn: &dyn Fn(&str) -> String,
+    bounds: &VarBounds,
+    approximated: &mut bool,
+) -> Result<Linear, String> {
+    match expr {
+        Expr::Int(n) => Ok(Linear::constant_only(*n)),
+        Expr::Var(name) => Ok(Linear::var(&var_fn(name))),
+        Expr::Field { base, field } => Ok(Linear::var(&field_fn(base, field))),
+        Expr::Old(e) => {
+            linearize_bounded(e, &|b, f| pre_field(b, f), var_fn, bounds, approximated)
+        }
+        Expr::Unary { op, expr } => match op {
+            UnOp::Neg => Ok(linearize_bounded(expr, field_fn, var_fn, bounds, approximated)?.neg()),
+        },
+        Expr::Bin { op, lhs, rhs } => {
+            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
+            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated)?;
+            match op {
+                BinOp::Add => Ok(l.add(&r)),
+                BinOp::Sub => Ok(l.sub(&r)),
+                BinOp::Mul => {
+                    if let Some(k) = as_int(rhs) {
+                        Ok(l.scale(k))
+                    } else if let Some(k) = as_int(lhs) {
+                        Ok(r.scale(k))
+                    } else {
+                        // Try interval bounding: replace a * b with a constant
+                        // derived from the worst-case product of their bounds.
+                        let a_name = expr_var_name(lhs, field_fn, var_fn);
+                        let b_name = expr_var_name(rhs, field_fn, var_fn);
+                        if let (Some(ref a), Some(ref b)) = (a_name, b_name) {
+                            let ab = lookup_bounds(bounds, a);
+                            let bb = lookup_bounds(bounds, b);
+                            if let (
+                                Some((Some(a_lo), Some(a_hi))),
+                                Some((Some(b_lo), Some(b_hi))),
+                            ) = (ab, bb)
+                            {
+                                let corners = [
+                                    a_lo.saturating_mul(*b_lo),
+                                    a_lo.saturating_mul(*b_hi),
+                                    a_hi.saturating_mul(*b_lo),
+                                    a_hi.saturating_mul(*b_hi),
+                                ];
+                                let product_bound = *corners.iter().max().unwrap();
+                                *approximated = true;
+                                return Ok(Linear::constant_only(product_bound));
+                            }
+                        }
+                        Err(format!(
+                            "non-linear multiplication ({} * {}) cannot be verified; \
+                             add `requires` bounds on both variables to enable \
+                             interval-bounding approximation",
+                            pretty(lhs),
+                            pretty(rhs)
+                        ))
+                    }
+                }
+                BinOp::Div => {
+                    if let Some(k) = as_int(rhs) {
+                        if k == 0 {
+                            Err("division by zero".into())
+                        } else {
+                            Ok(scale_exact(&l, k)?)
+                        }
+                    } else {
+                        Err("division must be by a constant in constraints".into())
+                    }
+                }
+                _ => Err("expected arithmetic expression".into()),
+            }
+        }
+    }
+}
+
+/// Like [`to_constraints`] but uses [`linearize_bounded`] to handle nonlinear
+/// products via interval-arithmetic bounding. Sets `*approximated = true` when
+/// any product was replaced by an interval-bounded constant.
+fn to_constraints_bounded(
+    expr: &Expr,
+    field_fn: &Naming,
+    var_fn: &dyn Fn(&str) -> String,
+    bounds: &VarBounds,
+    approximated: &mut bool,
+) -> Result<Vec<Constraint>, String> {
+    match expr {
+        Expr::Bin { op, lhs, rhs } if *op == BinOp::And => {
+            let mut out = to_constraints_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
+            out.extend(to_constraints_bounded(rhs, field_fn, var_fn, bounds, approximated)?);
+            Ok(out)
+        }
+        Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
+            let rel = relation_of(*op).unwrap();
+            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
+            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated)?;
+            let diff = l.sub(&r);
+            Ok(vec![Constraint(diff, rel)])
+        }
+        _ => Err("expected a boolean constraint (comparison or `&&`)".into()),
     }
 }
 
@@ -391,14 +575,23 @@ fn build_problem(
         }
     }
 
+    // Derive per-variable bounds from the now-complete premise set.
+    // These are used to linearize nonlinear products in conclusions via
+    // interval-arithmetic bounding (see `linearize_bounded`).
+    let premise_bounds = collect_var_bounds(&premises);
+
     // conclusions: ensures + exit invariants
     let mut conclusions: Vec<Conclusion> = Vec::new();
     for e in &func.ensures {
-        for c in to_constraints(e, &post_fn, &var_fn)? {
+        let mut approximated = false;
+        let cs =
+            to_constraints_bounded(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
+        for c in cs {
             conclusions.push(Conclusion {
                 description: format!("ensures: {}", pretty(e)),
                 constraint: c,
                 is_ensures: true,
+                is_approximation: approximated,
             });
         }
     }
@@ -406,7 +599,15 @@ fn build_problem(
         if let Some(inv) = invariants.get(p.ty.name()) {
             for c in &inv.constraints {
                 let inst = instantiate(c, &p.name);
-                for c2 in to_constraints(&inst, &post_fn, &var_fn)? {
+                let mut approximated = false;
+                let cs = to_constraints_bounded(
+                    &inst,
+                    &post_fn,
+                    &var_fn,
+                    &premise_bounds,
+                    &mut approximated,
+                )?;
+                for c2 in cs {
                     conclusions.push(Conclusion {
                         description: format!(
                             "invariant {} maintained: {}",
@@ -415,6 +616,7 @@ fn build_problem(
                         ),
                         constraint: c2,
                         is_ensures: false,
+                        is_approximation: approximated,
                     });
                 }
             }

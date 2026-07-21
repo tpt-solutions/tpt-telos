@@ -21,9 +21,9 @@ use std::path::Path;
 
 use tpt_telos_agent::FuncOutcome;
 use tpt_telos_parser::ast::*;
-use tpt_telos_router::Target;
+use tpt_telos_router::{RoutingDiagnostic, Target};
 
-use crate::{collect_bodies, ffi, go, render_rust};
+use crate::{collect_bodies, ffi, go, python, render_rust};
 
 /// Go package name used for the generated service and its FFI shims.
 pub const GO_PACKAGE: &str = "gosvc";
@@ -71,6 +71,10 @@ pub struct Project {
     pub has_rust: bool,
     pub has_go: bool,
     pub has_ffi: bool,
+    pub has_python: bool,
+    /// Routing diagnostics (e.g. real_time + Go conflicts) collected during
+    /// module routing.  Callers should surface these as warnings.
+    pub diagnostics: Vec<RoutingDiagnostic>,
 }
 
 impl Project {
@@ -144,17 +148,24 @@ impl Project {
 pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project {
     let bodies = collect_bodies(outcomes);
 
-    let rust_mods: Vec<&Module> = modules
-        .iter()
-        .filter(|m| tpt_telos_router::route(&m.attributes).target == Target::Rust)
-        .collect();
-    let go_mods: Vec<&Module> = modules
-        .iter()
-        .filter(|m| tpt_telos_router::route(&m.attributes).target == Target::Go)
-        .collect();
+    // Route every module and collect diagnostics.
+    let mut all_diagnostics: Vec<RoutingDiagnostic> = Vec::new();
+    let mut rust_mods: Vec<&Module> = Vec::new();
+    let mut go_mods: Vec<&Module> = Vec::new();
+    let mut py_mods: Vec<&Module> = Vec::new();
+    for m in modules {
+        let (route, diags) = tpt_telos_router::route_checked(&m.attributes, &m.name);
+        all_diagnostics.extend(diags);
+        match route.target {
+            Target::Rust => rust_mods.push(m),
+            Target::Go => go_mods.push(m),
+            Target::Python => py_mods.push(m),
+        }
+    }
 
     let has_rust = !rust_mods.is_empty();
     let has_go = !go_mods.is_empty();
+    let has_python = !py_mods.is_empty();
     let has_ffi = has_rust && has_go;
 
     let mut files = Vec::new();
@@ -202,11 +213,35 @@ pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project
         });
     }
 
+    if has_python {
+        // Detect JAX flag for any Python-target module.
+        let use_jax = py_mods.iter().any(|m| {
+            m.attributes.iter().any(|a| {
+                a.name == "boundary"
+                    && a.args
+                        .iter()
+                        .any(|arg| matches!(arg, tpt_telos_parser::ast::Arg::Flag(f) if f == "jax"))
+            })
+        });
+        let service = python::generate_python_package(&py_mods, &bodies, use_jax);
+        files.push(GeneratedFile {
+            path: "python/service.py".to_string(),
+            contents: service,
+        });
+        let req = if use_jax { "jax\n" } else { "# No runtime dependencies\n" };
+        files.push(GeneratedFile {
+            path: "python/requirements.txt".to_string(),
+            contents: req.to_string(),
+        });
+    }
+
     Project {
         files,
         has_rust,
         has_go,
         has_ffi,
+        has_python,
+        diagnostics: all_diagnostics,
     }
 }
 

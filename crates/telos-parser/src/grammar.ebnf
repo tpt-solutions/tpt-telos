@@ -1,6 +1,45 @@
 Formal Grammar for tpt-telos (v0.1.0)
 ====================================
 
+--------------------------------------------------------------------------------
+Language Feature Matrix
+--------------------------------------------------------------------------------
+
+SUPPORTED (verifier + all backends):
+  Arithmetic operators    +  -  *  /  (unary -)
+  Comparison operators    ==  !=  <  <=  >  >=
+  Logical conjunction     &&  (in requires/ensures)
+  Post-conditions         ensures e        (provable from requires + mutations)
+  Pre-conditions          requires e       (assumed true in pre-state)
+  Pre-state reference     old(expr)        (e.g. old(w.balance))
+  Mutation block          mutate state { target (= | += | -=) expr; }
+  Field paths             e.g. wallet.balance, s.pressure
+  Invariant types         invariant T { constraint }  (checked at entry + post-mutate)
+  Refinement type         PositiveInt      (built-in; treated as Int with balance >= 0 premise)
+  Module attributes       @boundary(...)   (routing), @state(...)  (storage class, parsed only)
+  Function attributes     @eject           (compile as trusted opaque + contract guard)
+  Routing flags           cpu_bound  zero_allocation  crypto  real_time      → Rust
+                          network_io  high_concurrency  distributed  high_latency → Go
+                          ml_training  python  jax                            → Python
+  Nonlinear contracts     x * y < K        (verified via interval bounding when bounds present;
+                                            marked [interval-bounded] in output)
+
+PARTIAL / LIMITED:
+  Logical disjunction     ||  parsed but rejected at IR lowering (Phase 6: DNF normalization)
+  @state(...) semantics   parsed and forwarded to router; storage-class behavior not enforced
+  Integer types only      Int / PositiveInt only; no Float32/Float64 (Phase 6)
+
+UNSUPPORTED (parse error or silent drop):
+  Control flow            if / while / match / for / break / continue
+  Function calls          calling other telos functions inside expressions
+  Generics                no type parameters (T<U>)
+  Strings / booleans      no string or bool literal types
+  Arrays / slices         no [T; N] or [T] (Phase 6)
+  Cross-module refs       invariant types from other modules not referenceable (Phase 6)
+  Floating-point          no f32/f64 literals or operations (Phase 6)
+
+--------------------------------------------------------------------------------
+
 Notation: EBNF. `{ ... }*` zero-or-more, `{ ... }+` one-or-more,
 `[ ... ]` optional, `( ... )` grouping. `//` introduces a comment.
 

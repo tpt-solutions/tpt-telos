@@ -9,6 +9,10 @@ pub struct CheckResult {
     pub description: String,
     pub passed: bool,
     pub is_ensures: bool,
+    /// Mirrors [`tpt_telos_ir::Conclusion::is_approximation`]: true when the
+    /// constraint was proved via interval-arithmetic bounding of a nonlinear
+    /// product rather than exact linear arithmetic.
+    pub is_approximation: bool,
 }
 
 /// The aggregate verification result for a single function.
@@ -58,6 +62,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
             description: concl.description.clone(),
             passed,
             is_ensures: concl.is_ensures,
+            is_approximation: concl.is_approximation,
         });
     }
     VerificationResult {
