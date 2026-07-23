@@ -18,10 +18,10 @@ use crate::{analyze_func, collect_types, InputParam, TypeFields};
 /// Python keywords that may not appear as unqualified identifiers.
 /// Telos identifiers that clash are suffixed with `_`.
 const PY_KEYWORDS: &[&str] = &[
-    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
-    "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
-    "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return",
-    "try", "while", "with", "yield",
+    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
+    "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
+    "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+    "with", "yield",
 ];
 
 fn py_safe(name: &str) -> String {
@@ -214,6 +214,7 @@ fn render_py_func(f: &Func, stmts: &[Stmt], types: &TypeFields, int_type: &str) 
                 };
                 out.push_str(&format!("    {} {} {}\n", lhs, op, rhs));
             }
+            _ => {}
         }
     }
 
@@ -303,6 +304,7 @@ fn render_expr_py_with_old(e: &Expr, _old_fields: &[(String, String)]) -> String
             let s = py_bin_op(*op);
             format!("{} {} {}", l, s, r)
         }
+        other => render_expr_py(other),
     }
 }
 
@@ -321,6 +323,7 @@ fn render_expr_py(e: &Expr) -> String {
             let s = py_bin_op(*op);
             format!("{} {} {}", l, s, r)
         }
+        other => crate::render_expr(other),
     }
 }
 
@@ -352,6 +355,7 @@ fn render_expr_py_doc(e: &Expr) -> String {
             };
             format!("{} {} {}", l, s, r)
         }
+        other => crate::render_expr_doc(other),
     }
 }
 
@@ -389,6 +393,7 @@ fn render_inv_py(e: &Expr) -> String {
             let s = py_bin_op(*op);
             format!("{} {} {}", l, s, r)
         }
+        other => crate::render_expr(other),
     }
 }
 
@@ -422,8 +427,14 @@ mod tests {
         assert!(py.contains("@dataclass"), "missing @dataclass: {py}");
         assert!(py.contains("class State"), "missing State class: {py}");
         assert!(py.contains("def update_energy"), "missing function: {py}");
-        assert!(py.contains("assert delta >= 0"), "missing precondition: {py}");
-        assert!(py.contains("def satisfies_invariants"), "missing invariant method: {py}");
+        assert!(
+            py.contains("assert delta >= 0"),
+            "missing precondition: {py}"
+        );
+        assert!(
+            py.contains("def satisfies_invariants"),
+            "missing invariant method: {py}"
+        );
     }
 
     #[test]
@@ -432,6 +443,9 @@ mod tests {
         let modules = tpt_telos_parser::parse(src).unwrap();
         let refs: Vec<&tpt_telos_parser::ast::Module> = modules.iter().collect();
         let py = generate_python_package(&refs, &std::collections::HashMap::new(), true);
-        assert!(py.contains("import jax.numpy as jnp"), "missing JAX import: {py}");
+        assert!(
+            py.contains("import jax.numpy as jnp"),
+            "missing JAX import: {py}"
+        );
     }
 }

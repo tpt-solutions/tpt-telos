@@ -219,6 +219,7 @@ pub(crate) fn render_func_named(
                     out.push('\n');
                 }
             }
+            _ => {}
         }
     }
 
@@ -260,6 +261,41 @@ pub(crate) fn render_expr(e: &Expr) -> String {
         Expr::Bin { op, lhs, rhs } => {
             format!("{} {} {}", render_expr(lhs), bin_op(*op), render_expr(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(render_expr).collect();
+            format!("{}({})", exported(&c.func), args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(render_expr).collect();
+            format!(
+                "{}.{}({})",
+                render_expr(&m.receiver),
+                exported(&m.method),
+                args.join(", ")
+            )
+        }
+        Expr::Index(i) => {
+            format!("{}[{}]", render_expr(&i.receiver), render_expr(&i.index))
+        }
+        Expr::If(i) => {
+            // Go doesn't have if-expressions; render as ternary-style.
+            format!(
+                "(func() int64 {{ if {} {{ return {} }} return {} }})()",
+                render_expr(&i.condition),
+                render_expr(&i.then_expr),
+                render_expr(&i.else_expr)
+            )
+        }
+        Expr::Try(e) => format!("{}_Must{}", render_expr(e), "_TODO"),
+        Expr::Forall(f) => {
+            // Quantifiers are not natively supported in Go; emit a comment.
+            format!("/* forall {}: {} */", f.var, render_type_go(&f.var_ty))
+        }
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(render_expr).collect();
+            format!("/* {}({}) */", a.op.op_name(), args.join(", "))
+        }
+        other => format!("/* unsupported: {} */", crate::render_expr(other)),
     }
 }
 
@@ -279,6 +315,7 @@ fn render_inv(e: &Expr, recv: &str) -> String {
             bin_op(*op),
             render_inv(rhs, recv)
         ),
+        other => render_expr(other),
     }
 }
 
@@ -296,5 +333,19 @@ pub(crate) fn bin_op(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
+    }
+}
+
+pub(crate) fn render_type_go(t: &Type) -> String {
+    match t {
+        Type::Named(s) => s.clone(),
+        Type::Generic(name, args) => {
+            let args: Vec<_> = args.iter().map(render_type_go).collect();
+            format!("{}<{}>", name, args.join(", "))
+        }
+        Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(render_type_go).collect();
+            format!("({})", elems.join(", "))
+        }
     }
 }

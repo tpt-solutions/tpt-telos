@@ -67,6 +67,7 @@ pub(crate) fn analyze_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Func
         let assigns = match stmt {
             Stmt::MutateState(a) => a,
             Stmt::Assign(a) => std::slice::from_ref(a),
+            _ => continue,
         };
         for a in assigns {
             match &a.target {
@@ -203,6 +204,7 @@ pub(crate) fn collect_types(module: &Module, types: &mut TypeFields) {
                 let assigns = match stmt {
                     Stmt::MutateState(a) => a,
                     Stmt::Assign(a) => std::slice::from_ref(a),
+                    _ => continue,
                 };
                 for a in assigns {
                     if let Expr::Field { base, field } = &a.target {
@@ -371,6 +373,49 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
                     out.push_str(";\n");
                 }
             }
+            Stmt::Let(lb) => {
+                let ty = lb
+                    .ty
+                    .as_ref()
+                    .map(|t| format!(": {}", render_type(t)))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "    let {}{} = {};\n",
+                    lb.name,
+                    ty,
+                    render_expr(&lb.value)
+                ));
+            }
+            Stmt::If(is) => {
+                out.push_str(&format!("    if {} {{\n", render_expr(&is.condition)));
+                for s in &is.then_body {
+                    render_stmt_indented(s, &mut out, 2);
+                }
+                out.push_str("    }");
+                if let Some(else_body) = &is.else_body {
+                    out.push_str(" else {\n");
+                    for s in else_body {
+                        render_stmt_indented(s, &mut out, 2);
+                    }
+                    out.push_str("    }");
+                }
+                out.push('\n');
+            }
+            Stmt::Match(ms) => {
+                out.push_str(&format!("    match {} {{\n", render_expr(&ms.scrutinee)));
+                for arm in &ms.arms {
+                    out.push_str(&format!("        {} => {{\n", render_pattern(&arm.pattern)));
+                    for s in &arm.body {
+                        render_stmt_indented(s, &mut out, 3);
+                    }
+                    out.push_str("        }\n");
+                }
+                out.push_str("    }\n");
+            }
+            Stmt::Return(e) => match e {
+                Some(expr) => out.push_str(&format!("    return {};\n", render_expr(expr))),
+                None => out.push_str("    return;\n"),
+            },
         }
     }
 
@@ -434,6 +479,57 @@ pub(crate) fn render_expr(e: &Expr) -> String {
             };
             format!("{} {} {}", render_expr(lhs), s, render_expr(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(render_expr).collect();
+            format!("{}({})", c.func, args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(render_expr).collect();
+            format!(
+                "{}.{}({})",
+                render_expr(&m.receiver),
+                m.method,
+                args.join(", ")
+            )
+        }
+        Expr::Index(i) => {
+            format!("{}[{}]", render_expr(&i.receiver), render_expr(&i.index))
+        }
+        Expr::If(i) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            render_expr(&i.condition),
+            render_expr(&i.then_expr),
+            render_expr(&i.else_expr)
+        ),
+        Expr::Match(m) => {
+            let arms: Vec<_> = m
+                .arms
+                .iter()
+                .map(|a| format!("{} => {}", render_pattern(&a.pattern), render_expr(&a.expr)))
+                .collect();
+            format!(
+                "match {} {{ {} }}",
+                render_expr(&m.scrutinee),
+                arms.join(", ")
+            )
+        }
+        Expr::Try(e) => format!("{}?", render_expr(e)),
+        Expr::Forall(f) => format!(
+            "forall {}: {} {{ {} }}",
+            f.var,
+            render_type(&f.var_ty),
+            render_expr(&f.body)
+        ),
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(render_expr).collect();
+            let op = match a.op {
+                AggregateOp::Sum => "sum",
+                AggregateOp::Min => "min",
+                AggregateOp::Max => "max",
+                AggregateOp::Count => "count",
+            };
+            format!("{}({})", op, args.join(", "))
+        }
     }
 }
 
@@ -465,6 +561,8 @@ pub(crate) fn render_expr_doc(e: &Expr) -> String {
             };
             format!("{} {} {}", render_expr_doc(lhs), s, render_expr_doc(rhs))
         }
+        // For doc-comments, fall back to the standard renderer for new kinds.
+        other => render_expr(other),
     }
 }
 
@@ -497,7 +595,96 @@ fn render_inv(e: &Expr) -> String {
             };
             format!("{} {} {}", render_inv(lhs), s, render_inv(rhs))
         }
+        other => render_expr(other),
     }
+}
+
+pub(crate) fn render_type(t: &Type) -> String {
+    match t {
+        Type::Named(s) => s.clone(),
+        Type::Generic(name, args) => {
+            let args: Vec<_> = args.iter().map(render_type).collect();
+            format!("{}<{}>", name, args.join(", "))
+        }
+        Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(render_type).collect();
+            format!("({})", elems.join(", "))
+        }
+    }
+}
+
+pub(crate) fn render_pattern(p: &Pattern) -> String {
+    match p {
+        Pattern::Literal(n) => n.to_string(),
+        Pattern::Var(v) => v.clone(),
+        Pattern::Constructor(name, fields) => {
+            if fields.is_empty() {
+                name.clone()
+            } else {
+                let fields: Vec<_> = fields.iter().map(render_pattern).collect();
+                format!("{}({})", name, fields.join(", "))
+            }
+        }
+        Pattern::Wildcard => "_".to_string(),
+    }
+}
+
+fn render_stmt_indented(s: &Stmt, out: &mut String, indent: usize) {
+    let prefix = "    ".repeat(indent);
+    let rendered = match s {
+        Stmt::MutateState(assigns) => {
+            let inner: Vec<_> = assigns.iter().map(render_assign).collect();
+            format!("mutate state {{ {} }}", inner.join("; "))
+        }
+        Stmt::Assign(a) => render_assign(a),
+        Stmt::Let(lb) => {
+            let ty = lb
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", render_type(t)))
+                .unwrap_or_default();
+            format!("let {}{} = {};", lb.name, ty, render_expr(&lb.value))
+        }
+        Stmt::If(is) => {
+            let mut result = format!("if {} {{\n", render_expr(&is.condition));
+            for s in &is.then_body {
+                result.push_str(&format!("{}    ", prefix));
+                render_stmt_indented(s, &mut result, indent + 1);
+            }
+            result.push_str(&format!("{}}}", prefix));
+            if let Some(else_body) = &is.else_body {
+                result.push_str(" else {\n");
+                for s in else_body {
+                    result.push_str(&format!("{}    ", prefix));
+                    render_stmt_indented(s, &mut result, indent + 1);
+                }
+                result.push_str(&format!("{}}}", prefix));
+            }
+            result
+        }
+        Stmt::Match(ms) => {
+            let mut result = format!("match {} {{\n", render_expr(&ms.scrutinee));
+            for arm in &ms.arms {
+                result.push_str(&format!(
+                    "{}    {} => {{\n",
+                    prefix,
+                    render_pattern(&arm.pattern)
+                ));
+                for s in &arm.body {
+                    result.push_str(&format!("{}        ", prefix));
+                    render_stmt_indented(s, &mut result, indent + 2);
+                }
+                result.push_str(&format!("{}}}\n", prefix));
+            }
+            result.push_str(&format!("{}}}", prefix));
+            result
+        }
+        Stmt::Return(e) => match e {
+            Some(expr) => format!("return {};", render_expr(expr)),
+            None => "return;".to_string(),
+        },
+    };
+    out.push_str(&format!("{}{}\n", prefix, rendered));
 }
 
 // ===========================================================================
@@ -555,6 +742,7 @@ mod tests {
             attributes: vec![],
             name: name.to_string(),
             params,
+            return_ty: None,
             requires,
             ensures,
             body,
@@ -577,6 +765,7 @@ mod tests {
             vec![Param {
                 name: "x".into(),
                 ty: Type::Named("i64".into()),
+                mutability: ParamMutability::Immutable,
             }],
             vec![],
             vec![],
@@ -594,6 +783,7 @@ mod tests {
             vec![Param {
                 name: "c".into(),
                 ty: Type::Named("Counter".into()),
+                mutability: ParamMutability::Immutable,
             }],
             vec![],
             vec![],
@@ -617,6 +807,7 @@ mod tests {
             vec![Param {
                 name: "c".into(),
                 ty: Type::Named("Counter".into()),
+                mutability: ParamMutability::Immutable,
             }],
             vec![],
             vec![],
@@ -639,10 +830,12 @@ mod tests {
                 Param {
                     name: "c".into(),
                     ty: Type::Named("Counter".into()),
+                    mutability: ParamMutability::Immutable,
                 },
                 Param {
                     name: "result".into(),
                     ty: Type::Named("i64".into()),
+                    mutability: ParamMutability::Immutable,
                 },
             ],
             vec![],
@@ -668,6 +861,7 @@ mod tests {
             vec![Param {
                 name: "c".into(),
                 ty: Type::Named("Counter".into()),
+                mutability: ParamMutability::Immutable,
             }],
             vec![t_bin(BinOp::Ge, t_field("c", "v"), t_int(0))],
             vec![t_bin(
@@ -701,10 +895,12 @@ mod tests {
                 Param {
                     name: "c".into(),
                     ty: Type::Named("Counter".into()),
+                    mutability: ParamMutability::Immutable,
                 },
                 Param {
                     name: "result".into(),
                     ty: Type::Named("i64".into()),
+                    mutability: ParamMutability::Immutable,
                 },
             ],
             vec![],
@@ -740,6 +936,7 @@ mod tests {
                 vec![Param {
                     name: "c".into(),
                     ty: Type::Named("Counter".into()),
+                    mutability: ParamMutability::Immutable,
                 }],
                 vec![t_bin(BinOp::Ge, t_field("c", "v"), t_int(0))],
                 vec![],
@@ -774,6 +971,7 @@ mod tests {
             vec![Param {
                 name: "b".into(),
                 ty: Type::Named("Balance".into()),
+                mutability: ParamMutability::Immutable,
             }],
             vec![t_bin(BinOp::Ge, t_field("b", "amount"), t_int(0))],
             vec![t_bin(

@@ -51,6 +51,7 @@ fn func_with(
         attributes: vec![],
         name: name.to_string(),
         params,
+        return_ty: None,
         requires,
         ensures,
         body,
@@ -69,10 +70,12 @@ fn synthesize_field_and_scalar_from_ensures() {
             Param {
                 name: "c".into(),
                 ty: Type::Named("Counter".into()),
+                mutability: ParamMutability::Immutable,
             },
             Param {
                 name: "by".into(),
                 ty: Type::Named("PositiveInt".into()),
+                mutability: ParamMutability::Immutable,
             },
         ],
         vec![],
@@ -110,6 +113,7 @@ fn synthesize_resolves_nested_old_arithmetic() {
         vec![Param {
             name: "c".into(),
             ty: Type::Named("Counter".into()),
+            mutability: ParamMutability::Immutable,
         }],
         vec![],
         vec![bin(
@@ -134,6 +138,7 @@ fn synthesize_ignores_non_equality_clause() {
         vec![Param {
             name: "x".into(),
             ty: Type::Named("i64".into()),
+            mutability: ParamMutability::Immutable,
         }],
         vec![],
         vec![bin(BinOp::Ge, var("x"), int(0))],
@@ -162,6 +167,7 @@ fn generate_returns_developer_body_when_present() {
         vec![Param {
             name: "c".into(),
             ty: Type::Named("Counter".into()),
+            mutability: ParamMutability::Immutable,
         }],
         vec![],
         vec![],
@@ -181,6 +187,7 @@ fn generate_synthesizes_when_elided() {
         vec![Param {
             name: "c".into(),
             ty: Type::Named("Counter".into()),
+            mutability: ParamMutability::Immutable,
         }],
         vec![],
         vec![bin(
@@ -213,10 +220,12 @@ fn rewrite_fixes_broken_field_from_counter_example() {
             Param {
                 name: "from".into(),
                 ty: Type::Named("Wallet".into()),
+                mutability: ParamMutability::Immutable,
             },
             Param {
                 name: "amount".into(),
                 ty: Type::Named("i64".into()),
+                mutability: ParamMutability::Immutable,
             },
         ],
         vec![],
@@ -265,6 +274,7 @@ fn rewrite_with_empty_counter_example_resynthesizes() {
         vec![Param {
             name: "c".into(),
             ty: Type::Named("Counter".into()),
+            mutability: ParamMutability::Immutable,
         }],
         vec![],
         vec![bin(
@@ -338,6 +348,7 @@ fn loop_hits_retry_limit_and_gives_up() {
         vec![Param {
             name: "s".into(),
             ty: Type::Named("S".into()),
+            mutability: ParamMutability::Immutable,
         }],
         vec![],
         vec![bin(BinOp::Eq, field("s", "v"), int(0))],

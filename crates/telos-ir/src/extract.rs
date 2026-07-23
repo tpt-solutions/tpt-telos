@@ -49,6 +49,9 @@ fn instantiate(expr: &Expr, base: &str) -> Expr {
             lhs: Box::new(instantiate(lhs, base)),
             rhs: Box::new(instantiate(rhs, base)),
         },
+        // New expression kinds are cloned as-is (they are not lowered to IR
+        // constraints; they appear only in codegen or runtime paths).
+        other => other.clone(),
     }
 }
 
@@ -94,6 +97,12 @@ fn linearize(
                 _ => Err("expected arithmetic expression".into()),
             }
         }
+        // New expression kinds (Call, If, Match, etc.) cannot be lowered to
+        // linear arithmetic. They are handled at the codegen level only.
+        other => Err(format!(
+            "expression `{}` cannot be lowered to linear arithmetic",
+            pretty(other)
+        )),
     }
 }
 
@@ -183,9 +192,7 @@ fn linearize_bounded(
         Expr::Int(n) => Ok(Linear::constant_only(*n)),
         Expr::Var(name) => Ok(Linear::var(&var_fn(name))),
         Expr::Field { base, field } => Ok(Linear::var(&field_fn(base, field))),
-        Expr::Old(e) => {
-            linearize_bounded(e, &|b, f| pre_field(b, f), var_fn, bounds, approximated)
-        }
+        Expr::Old(e) => linearize_bounded(e, &|b, f| pre_field(b, f), var_fn, bounds, approximated),
         Expr::Unary { op, expr } => match op {
             UnOp::Neg => Ok(linearize_bounded(expr, field_fn, var_fn, bounds, approximated)?.neg()),
         },
@@ -247,6 +254,12 @@ fn linearize_bounded(
                 _ => Err("expected arithmetic expression".into()),
             }
         }
+        // New expression kinds (Call, If, Match, etc.) cannot be lowered to
+        // linear arithmetic. They are handled at the codegen level only.
+        other => Err(format!(
+            "expression `{}` cannot be lowered to linear arithmetic",
+            pretty(other)
+        )),
     }
 }
 
@@ -263,7 +276,13 @@ fn to_constraints_bounded(
     match expr {
         Expr::Bin { op, lhs, rhs } if *op == BinOp::And => {
             let mut out = to_constraints_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
-            out.extend(to_constraints_bounded(rhs, field_fn, var_fn, bounds, approximated)?);
+            out.extend(to_constraints_bounded(
+                rhs,
+                field_fn,
+                var_fn,
+                bounds,
+                approximated,
+            )?);
             Ok(out)
         }
         Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
@@ -405,6 +424,46 @@ fn pretty(expr: &Expr) -> String {
             };
             format!("{} {} {}", pretty(lhs), s, pretty(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(pretty).collect();
+            format!("{}({})", c.func, args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(pretty).collect();
+            format!("{}.{}({})", pretty(&m.receiver), m.method, args.join(", "))
+        }
+        Expr::Index(i) => format!("{}[{}]", pretty(&i.receiver), pretty(&i.index)),
+        Expr::If(i) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            pretty(&i.condition),
+            pretty(&i.then_expr),
+            pretty(&i.else_expr)
+        ),
+        Expr::Match(m) => {
+            let arms: Vec<_> = m
+                .arms
+                .iter()
+                .map(|a| format!("... => {}", pretty(&a.expr)))
+                .collect();
+            format!("match {} {{ {} }}", pretty(&m.scrutinee), arms.join(", "))
+        }
+        Expr::Try(e) => format!("{}?", pretty(e)),
+        Expr::Forall(f) => format!(
+            "forall {}: {} {{ {} }}",
+            f.var,
+            f.var_ty.name(),
+            pretty(&f.body)
+        ),
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(pretty).collect();
+            let op = match a.op {
+                AggregateOp::Sum => "sum",
+                AggregateOp::Min => "min",
+                AggregateOp::Max => "max",
+                AggregateOp::Count => "count",
+            };
+            format!("{}({})", op, args.join(", "))
+        }
     }
 }
 
@@ -526,6 +585,9 @@ fn build_problem(
                 premises.push(assign_constraint(a, &pre_fn, &var_fn)?);
                 std::slice::from_ref(a)
             }
+            // Let, If, Match, Return are not lowered to IR constraints; they
+            // are handled at the codegen/runtime level only.
+            _ => continue,
         };
         for a in assigns {
             premises.push(assign_constraint(a, &pre_fn, &var_fn)?);
@@ -547,6 +609,7 @@ fn build_problem(
         let assigns = match stmt {
             Stmt::MutateState(a) => a,
             Stmt::Assign(a) => std::slice::from_ref(a),
+            _ => continue,
         };
         for a in assigns {
             collect_fields(&a.value, &mut referenced);
@@ -584,8 +647,7 @@ fn build_problem(
     let mut conclusions: Vec<Conclusion> = Vec::new();
     for e in &func.ensures {
         let mut approximated = false;
-        let cs =
-            to_constraints_bounded(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
+        let cs = to_constraints_bounded(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
         for c in cs {
             conclusions.push(Conclusion {
                 description: format!("ensures: {}", pretty(e)),

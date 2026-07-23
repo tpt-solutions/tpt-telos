@@ -228,7 +228,11 @@ pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project
             path: "python/service.py".to_string(),
             contents: service,
         });
-        let req = if use_jax { "jax\n" } else { "# No runtime dependencies\n" };
+        let req = if use_jax {
+            "jax\n"
+        } else {
+            "# No runtime dependencies\n"
+        };
         files.push(GeneratedFile {
             path: "python/requirements.txt".to_string(),
             contents: req.to_string(),

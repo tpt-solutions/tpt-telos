@@ -4,14 +4,22 @@
 //! every operation is named explicitly. See `grammar.ebnf` for the formal
 //! specification.
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     /// A user or built-in named type, e.g. `Wallet`, `PositiveInt`.
     Named(String),
+    /// A generic type, e.g. `Result<Int, String>`, `Vec<Int>`.
+    Generic(String, Vec<Type>),
+    /// A tuple type, e.g. `(Int, String)`.
+    Tuple(Vec<Type>),
 }
 
 impl Type {
-    /// Return the name of this type.
+    /// Return the name of this type (the outermost constructor name).
     ///
     /// # Examples
     ///
@@ -24,9 +32,40 @@ impl Type {
     pub fn name(&self) -> &str {
         match self {
             Type::Named(s) => s,
+            Type::Generic(s, _) => s,
+            Type::Tuple(_) => "Tuple",
         }
     }
+
+    /// Convenience: build `Result<T, E>`.
+    pub fn result(ok: Type, err: Type) -> Self {
+        Type::Generic("Result".into(), vec![ok, err])
+    }
+
+    /// Convenience: build `Int`.
+    pub fn int() -> Self {
+        Type::Named("Int".into())
+    }
+
+    /// Convenience: build `PositiveInt`.
+    pub fn positive_int() -> Self {
+        Type::Named("PositiveInt".into())
+    }
+
+    /// Convenience: build `Bool`.
+    pub fn bool() -> Self {
+        Type::Named("Bool".into())
+    }
+
+    /// Convenience: build `String` (the Telos string type, not Rust's).
+    pub fn string() -> Self {
+        Type::Named("String".into())
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Literals & attributes
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
@@ -48,6 +87,10 @@ pub struct Attribute {
     pub args: Vec<Arg>,
 }
 
+// ---------------------------------------------------------------------------
+// Modules & items
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub attributes: Vec<Attribute>,
@@ -59,10 +102,13 @@ pub struct Module {
 pub enum Item {
     Invariant(Invariant),
     Func(Func),
+    Struct(StructDef),
+    Enum(EnumDef),
 }
 
 impl Item {
-    /// Return the name of this item (function name or invariant type name).
+    /// Return the name of this item (function name, invariant type name,
+    /// struct name, or enum name).
     ///
     /// # Examples
     ///
@@ -76,6 +122,8 @@ impl Item {
         match self {
             Item::Func(f) => f.name.clone(),
             Item::Invariant(i) => i.name.clone(),
+            Item::Struct(s) => s.name.clone(),
+            Item::Enum(e) => e.name.clone(),
         }
     }
 }
@@ -87,10 +135,49 @@ pub struct Invariant {
     pub constraints: Vec<Expr>,
 }
 
+// ---------------------------------------------------------------------------
+// Struct / Enum definitions
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<FieldDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDef {
+    pub name: String,
+    pub variants: Vec<VariantDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldDef {
+    pub name: String,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantDef {
+    pub name: String,
+    pub fields: Vec<FieldDef>,
+}
+
+// ---------------------------------------------------------------------------
+// Functions
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
     pub name: String,
     pub ty: Type,
+    pub mutability: ParamMutability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamMutability {
+    Immutable,
+    Mutable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +188,7 @@ pub struct Func {
     pub attributes: Vec<Attribute>,
     pub name: String,
     pub params: Vec<Param>,
+    pub return_ty: Option<Type>,
     pub requires: Vec<Expr>,
     pub ensures: Vec<Expr>,
     pub body: Vec<Stmt>,
@@ -151,7 +239,16 @@ impl Func {
         }
         None
     }
+
+    /// Whether this function returns `Result<T, E>`.
+    pub fn returns_result(&self) -> bool {
+        matches!(&self.return_ty, Some(Type::Generic(name, _)) if name == "Result")
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Statements
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
@@ -159,7 +256,61 @@ pub enum Stmt {
     MutateState(Vec<Assign>),
     /// A bare assignment outside of `mutate state`.
     Assign(Assign),
+    /// `let name [: Type] = expr;`
+    Let(LetBinding),
+    /// `if expr { stmts } [else { stmts }]`
+    If(IfStmt),
+    /// `match expr { pattern => stmts, ... }`
+    Match(MatchStmt),
+    /// `return [expr];`
+    Return(Option<Expr>),
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LetBinding {
+    pub name: String,
+    pub ty: Option<Type>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IfStmt {
+    pub condition: Expr,
+    pub then_body: Vec<Stmt>,
+    pub else_body: Option<Vec<Stmt>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchStmt {
+    pub scrutinee: Expr,
+    pub arms: Vec<MatchArm>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Vec<Stmt>,
+}
+
+// ---------------------------------------------------------------------------
+// Patterns
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pattern {
+    /// A literal integer pattern.
+    Literal(i64),
+    /// A binding pattern: `x` binds the value to name `x`.
+    Var(String),
+    /// A constructor pattern: `Variant(field, ...)` or `Variant` (unit).
+    Constructor(String, Vec<Pattern>),
+    /// A wildcard pattern: `_`.
+    Wildcard,
+}
+
+// ---------------------------------------------------------------------------
+// Assignments
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assign {
@@ -174,6 +325,10 @@ pub enum AssignOp {
     Add,
     Sub,
 }
+
+// ---------------------------------------------------------------------------
+// Expressions
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
@@ -196,6 +351,93 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    /// A function call: `func(args)`.
+    Call(CallExpr),
+    /// A method call: `receiver.method(args)`.
+    MethodCall(MethodCallExpr),
+    /// An index expression: `receiver[index]`.
+    Index(IndexExpr),
+    /// An if expression: `if cond { a } else { b }`.
+    If(IfExpr),
+    /// A match expression: `match scrutinee { pattern => expr, ... }`.
+    Match(MatchExpr),
+    /// The try / error propagation operator: `expr?`.
+    Try(Box<Expr>),
+    /// A universal quantifier: `forall x: Type [in domain] { body }`.
+    Forall(ForallExpr),
+    /// An aggregate expression: `sum(expr)`, `min(a, b)`, etc.
+    Aggregate(AggregateExpr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallExpr {
+    pub func: String,
+    pub args: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCallExpr {
+    pub receiver: Box<Expr>,
+    pub method: String,
+    pub args: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexExpr {
+    pub receiver: Box<Expr>,
+    pub index: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IfExpr {
+    pub condition: Box<Expr>,
+    pub then_expr: Box<Expr>,
+    pub else_expr: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchExpr {
+    pub scrutinee: Box<Expr>,
+    pub arms: Vec<ExprMatchArm>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExprMatchArm {
+    pub pattern: Pattern,
+    pub expr: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForallExpr {
+    pub var: String,
+    pub var_ty: Type,
+    pub domain: Option<Box<Expr>>,
+    pub body: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AggregateExpr {
+    pub op: AggregateOp,
+    pub args: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregateOp {
+    Sum,
+    Min,
+    Max,
+    Count,
+}
+
+impl AggregateOp {
+    pub fn op_name(&self) -> &'static str {
+        match self {
+            AggregateOp::Sum => "sum",
+            AggregateOp::Min => "min",
+            AggregateOp::Max => "max",
+            AggregateOp::Count => "count",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

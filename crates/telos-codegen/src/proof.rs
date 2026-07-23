@@ -87,8 +87,14 @@ pub fn to_json(manifest: &ProofManifest) -> String {
         "  \"schema_version\": \"{}\",\n",
         manifest.schema_version
     ));
-    s.push_str(&format!("  \"source_hash\": \"{}\",\n", manifest.source_hash));
-    s.push_str(&format!("  \"verified_at\": \"{}\",\n", manifest.verified_at));
+    s.push_str(&format!(
+        "  \"source_hash\": \"{}\",\n",
+        manifest.source_hash
+    ));
+    s.push_str(&format!(
+        "  \"verified_at\": \"{}\",\n",
+        manifest.verified_at
+    ));
     s.push_str("  \"functions\": {\n");
     let funcs: Vec<_> = manifest.functions.iter().collect();
     for (i, (name, fp)) in funcs.iter().enumerate() {
@@ -187,7 +193,20 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
         year += 1;
     }
     let leap = is_leap(year);
-    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &md in &month_days {
         if days < md {
@@ -245,7 +264,11 @@ mod tests {
     #[test]
     fn manifest_has_source_hash() {
         let m = generate_manifest(b"module M {}", &[]);
-        assert!(m.source_hash.starts_with("sha256:"), "hash prefix: {}", m.source_hash);
+        assert!(
+            m.source_hash.starts_with("sha256:"),
+            "hash prefix: {}",
+            m.source_hash
+        );
         assert_eq!(m.source_hash.len(), 7 + 64);
     }
 
@@ -268,10 +291,19 @@ mod tests {
         let o = dummy_outcome("transfer", true, 2);
         let m = generate_manifest(b"src", &[o]);
         let json = to_json(&m);
-        assert!(json.contains("\"schema_version\""), "missing schema_version: {json}");
+        assert!(
+            json.contains("\"schema_version\""),
+            "missing schema_version: {json}"
+        );
         assert!(json.contains("\"transfer\""), "missing function: {json}");
-        assert!(json.contains("\"verified\": true"), "missing verified: {json}");
-        assert!(json.contains("\"manifest_hash\""), "missing manifest_hash: {json}");
+        assert!(
+            json.contains("\"verified\": true"),
+            "missing verified: {json}"
+        );
+        assert!(
+            json.contains("\"manifest_hash\""),
+            "missing manifest_hash: {json}"
+        );
     }
 
     #[test]
@@ -279,6 +311,9 @@ mod tests {
         let m = generate_manifest(b"x", &[]);
         let s = render_rust_proof_static(&m);
         assert!(s.contains("#[used]"), "missing #[used]: {s}");
-        assert!(s.contains("TELOS_PROOF_MANIFEST"), "missing static name: {s}");
+        assert!(
+            s.contains("TELOS_PROOF_MANIFEST"),
+            "missing static name: {s}"
+        );
     }
 }

@@ -12,6 +12,8 @@ pub enum Token {
     RParen,
     LBrace,
     RBrace,
+    LSquare, // [
+    RSquare, // ]
     Comma,
     Colon,
     Dot,
@@ -23,14 +25,18 @@ pub enum Token {
     Minus,
     Star,
     Slash,
-    EqEq, // ==
-    Ne,   // !=
-    Lt,   // <
-    Le,   // <=
-    Gt,   // >
-    Ge,   // >=
-    And,  // &&
-    Or,   // ||
+    EqEq,       // ==
+    Ne,         // !=
+    Lt,         // <
+    Le,         // <=
+    Gt,         // >
+    Ge,         // >=
+    And,        // &&
+    Or,         // ||
+    Arrow,      // ->
+    FatArrow,   // =>
+    Question,   // ?
+    UnderScore, // _
     KwModule,
     KwInvariant,
     KwFunc,
@@ -39,6 +45,20 @@ pub enum Token {
     KwMutate,
     KwState,
     KwOld,
+    KwLet,
+    KwMut,
+    KwIf,
+    KwElse,
+    KwMatch,
+    KwStruct,
+    KwEnum,
+    KwForall,
+    KwIn,
+    KwPure,
+    KwReturn,
+    KwResult,
+    KwOk,
+    KwErr,
     Eof,
 }
 
@@ -52,6 +72,8 @@ impl fmt::Display for Token {
             Token::RParen => ")",
             Token::LBrace => "{",
             Token::RBrace => "}",
+            Token::LSquare => "[",
+            Token::RSquare => "]",
             Token::Comma => ",",
             Token::Colon => ":",
             Token::Dot => ".",
@@ -71,6 +93,10 @@ impl fmt::Display for Token {
             Token::Ge => ">=",
             Token::And => "&&",
             Token::Or => "||",
+            Token::Arrow => "->",
+            Token::FatArrow => "=>",
+            Token::Question => "?",
+            Token::UnderScore => "_",
             Token::KwModule => "module",
             Token::KwInvariant => "invariant",
             Token::KwFunc => "func",
@@ -79,6 +105,20 @@ impl fmt::Display for Token {
             Token::KwMutate => "mutate",
             Token::KwState => "state",
             Token::KwOld => "old",
+            Token::KwLet => "let",
+            Token::KwMut => "mut",
+            Token::KwIf => "if",
+            Token::KwElse => "else",
+            Token::KwMatch => "match",
+            Token::KwStruct => "struct",
+            Token::KwEnum => "enum",
+            Token::KwForall => "forall",
+            Token::KwIn => "in",
+            Token::KwPure => "pure",
+            Token::KwReturn => "return",
+            Token::KwResult => "Result",
+            Token::KwOk => "Ok",
+            Token::KwErr => "Err",
             Token::Eof => "end of file",
         };
         write!(f, "`{s}`")
@@ -146,6 +186,21 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
                 "mutate" => Token::KwMutate,
                 "state" => Token::KwState,
                 "old" => Token::KwOld,
+                "let" => Token::KwLet,
+                "mut" => Token::KwMut,
+                "if" => Token::KwIf,
+                "else" => Token::KwElse,
+                "match" => Token::KwMatch,
+                "struct" => Token::KwStruct,
+                "enum" => Token::KwEnum,
+                "forall" => Token::KwForall,
+                "in" => Token::KwIn,
+                "pure" => Token::KwPure,
+                "return" => Token::KwReturn,
+                "Result" => Token::KwResult,
+                "Ok" => Token::KwOk,
+                "Err" => Token::KwErr,
+                "_" => Token::UnderScore,
                 _ => Token::Ident(s),
             };
             tokens.push((tok, start, i));
@@ -207,6 +262,16 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
             i += 2;
             continue;
         }
+        if c == '-' && i + 1 < chars.len() && chars[i + 1] == '>' {
+            tokens.push((Token::Arrow, start, i + 2));
+            i += 2;
+            continue;
+        }
+        if c == '=' && i + 1 < chars.len() && chars[i + 1] == '>' {
+            tokens.push((Token::FatArrow, start, i + 2));
+            i += 2;
+            continue;
+        }
 
         // single-character tokens
         let tok = match c {
@@ -215,6 +280,8 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
             ')' => Token::RParen,
             '{' => Token::LBrace,
             '}' => Token::RBrace,
+            '[' => Token::LSquare,
+            ']' => Token::RSquare,
             ',' => Token::Comma,
             ':' => Token::Colon,
             '.' => Token::Dot,
@@ -226,6 +293,7 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
             '/' => Token::Slash,
             '<' => Token::Lt,
             '>' => Token::Gt,
+            '?' => Token::Question,
             _ => return Err(format!("unexpected character `{c}` at offset {start}")),
         };
         tokens.push((tok, start, i + 1));

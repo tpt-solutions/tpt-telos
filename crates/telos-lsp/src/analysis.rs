@@ -367,5 +367,48 @@ fn pretty_expr(e: &Expr) -> String {
             };
             format!("{} {} {}", pretty_expr(lhs), s, pretty_expr(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(pretty_expr).collect();
+            format!("{}({})", c.func, args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(pretty_expr).collect();
+            format!(
+                "{}.{}({})",
+                pretty_expr(&m.receiver),
+                m.method,
+                args.join(", ")
+            )
+        }
+        Expr::Index(i) => format!("{}[{}]", pretty_expr(&i.receiver), pretty_expr(&i.index)),
+        Expr::If(i) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            pretty_expr(&i.condition),
+            pretty_expr(&i.then_expr),
+            pretty_expr(&i.else_expr)
+        ),
+        Expr::Match(m) => {
+            let arms: Vec<_> = m
+                .arms
+                .iter()
+                .map(|a| format!("... => {}", pretty_expr(&a.expr)))
+                .collect();
+            format!(
+                "match {} {{ {} }}",
+                pretty_expr(&m.scrutinee),
+                arms.join(", ")
+            )
+        }
+        Expr::Try(e) => format!("{}?", pretty_expr(e)),
+        Expr::Forall(f) => format!(
+            "forall {}: {} {{ {} }}",
+            f.var,
+            f.var_ty.name(),
+            pretty_expr(&f.body)
+        ),
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(pretty_expr).collect();
+            format!("{}({})", a.op.op_name(), args.join(", "))
+        }
     }
 }

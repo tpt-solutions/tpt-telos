@@ -153,6 +153,8 @@ fn rust_guard_inner(e: &Expr, scalar_out: Option<&str>, post: bool, in_old: bool
             crate::go::bin_op(*op),
             rust_guard_inner(rhs, scalar_out, post, in_old)
         ),
+        // New expression kinds: fall back to standard rendering.
+        other => crate::render_expr(other),
     }
 }
 
@@ -289,6 +291,7 @@ fn go_guard_inner(e: &Expr, scalar_out: Option<&str>, post: bool, in_old: bool) 
             crate::go::bin_op(*op),
             go_guard_inner(rhs, scalar_out, post, in_old)
         ),
+        other => crate::go::render_expr(other),
     }
 }
 

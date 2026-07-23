@@ -336,8 +336,7 @@ fn run_transpile(file: &str, llm: bool, out: Option<String>) -> Result<(), Strin
 }
 
 fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
-    let src_bytes =
-        fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
+    let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
     let agent = make_agent(llm)?;
 
@@ -407,8 +406,7 @@ fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
 }
 
 fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool, String> {
-    let src_bytes =
-        fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
+    let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
     let agent = make_agent(llm)?;
 
@@ -436,7 +434,11 @@ fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool
 
     // Surface routing diagnostics as warnings.
     for diag in &project.diagnostics {
-        eprintln!("WARNING [{}] {}", format!("{:?}", diag.kind).to_lowercase(), diag.message);
+        eprintln!(
+            "WARNING [{}] {}",
+            format!("{:?}", diag.kind).to_lowercase(),
+            diag.message
+        );
     }
 
     let root = std::path::Path::new(out_dir);
@@ -668,6 +670,33 @@ fn render_item(item: &Item) -> String {
     match item {
         Item::Invariant(i) => render_invariant(i),
         Item::Func(f) => render_func(f),
+        Item::Struct(s) => {
+            let fields: Vec<_> = s
+                .fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, render_type(&f.ty)))
+                .collect();
+            format!("struct {} {{ {} }}", s.name, fields.join(", "))
+        }
+        Item::Enum(e) => {
+            let variants: Vec<_> = e
+                .variants
+                .iter()
+                .map(|v| {
+                    if v.fields.is_empty() {
+                        v.name.clone()
+                    } else {
+                        let fields: Vec<_> = v
+                            .fields
+                            .iter()
+                            .map(|f| format!("{}: {}", f.name, render_type(&f.ty)))
+                            .collect();
+                        format!("{} {{ {} }}", v.name, fields.join(", "))
+                    }
+                })
+                .collect();
+            format!("enum {} {{ {} }}", e.name, variants.join(", "))
+        }
     }
 }
 
@@ -730,6 +759,50 @@ fn render_stmt(s: &Stmt) -> String {
             format!("mutate state {{\n{}\n}}", indent(&inner))
         }
         Stmt::Assign(a) => render_assign(a),
+        Stmt::Let(lb) => {
+            let ty = lb
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", render_type(t)))
+                .unwrap_or_default();
+            format!("let {}{} = {};", lb.name, ty, pretty_expr(&lb.value))
+        }
+        Stmt::If(is) => {
+            let mut out = format!("if {} {{\n", pretty_expr(&is.condition));
+            let then: Vec<_> = is.then_body.iter().map(render_stmt).collect();
+            out += &indent(&then.join("\n"));
+            out += "\n}";
+            if let Some(else_body) = &is.else_body {
+                let els: Vec<_> = else_body.iter().map(render_stmt).collect();
+                out += " else {\n";
+                out += &indent(&els.join("\n"));
+                out += "\n}";
+            }
+            out
+        }
+        Stmt::Match(ms) => {
+            let arms: Vec<_> = ms
+                .arms
+                .iter()
+                .map(|a| {
+                    let body: Vec<_> = a.body.iter().map(render_stmt).collect();
+                    format!(
+                        "{} => {{\n{}\n}}",
+                        render_pattern(&a.pattern),
+                        indent(&body.join("\n"))
+                    )
+                })
+                .collect();
+            format!(
+                "match {} {{\n{}\n}}",
+                pretty_expr(&ms.scrutinee),
+                indent(&arms.join("\n"))
+            )
+        }
+        Stmt::Return(e) => match e {
+            Some(expr) => format!("return {};", pretty_expr(expr)),
+            None => "return;".to_string(),
+        },
     }
 }
 
@@ -750,6 +823,14 @@ fn render_assign(a: &Assign) -> String {
 fn render_type(t: &Type) -> String {
     match t {
         Type::Named(s) => s.clone(),
+        Type::Generic(name, args) => {
+            let args: Vec<_> = args.iter().map(render_type).collect();
+            format!("{}<{}>", name, args.join(", "))
+        }
+        Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(render_type).collect();
+            format!("({})", elems.join(", "))
+        }
     }
 }
 
@@ -786,6 +867,65 @@ fn pretty_expr(e: &Expr) -> String {
             };
             format!("{} {} {}", pretty_expr(lhs), s, pretty_expr(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(pretty_expr).collect();
+            format!("{}({})", c.func, args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(pretty_expr).collect();
+            format!(
+                "{}.{}({})",
+                pretty_expr(&m.receiver),
+                m.method,
+                args.join(", ")
+            )
+        }
+        Expr::Index(i) => format!("{}[{}]", pretty_expr(&i.receiver), pretty_expr(&i.index)),
+        Expr::If(i) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            pretty_expr(&i.condition),
+            pretty_expr(&i.then_expr),
+            pretty_expr(&i.else_expr)
+        ),
+        Expr::Match(m) => {
+            let arms: Vec<_> = m
+                .arms
+                .iter()
+                .map(|a| format!("... => {}", pretty_expr(&a.expr)))
+                .collect();
+            format!(
+                "match {} {{ {} }}",
+                pretty_expr(&m.scrutinee),
+                arms.join(", ")
+            )
+        }
+        Expr::Try(e) => format!("{}?", pretty_expr(e)),
+        Expr::Forall(f) => format!(
+            "forall {}: {} {{ {} }}",
+            f.var,
+            f.var_ty.name(),
+            pretty_expr(&f.body)
+        ),
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(pretty_expr).collect();
+            format!("{}({})", a.op.op_name(), args.join(", "))
+        }
+    }
+}
+
+fn render_pattern(p: &Pattern) -> String {
+    match p {
+        Pattern::Literal(n) => n.to_string(),
+        Pattern::Var(v) => v.clone(),
+        Pattern::Constructor(name, fields) => {
+            if fields.is_empty() {
+                name.clone()
+            } else {
+                let fields: Vec<_> = fields.iter().map(render_pattern).collect();
+                format!("{}({})", name, fields.join(", "))
+            }
+        }
+        Pattern::Wildcard => "_".to_string(),
     }
 }
 

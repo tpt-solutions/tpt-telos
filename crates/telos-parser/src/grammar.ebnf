@@ -1,5 +1,5 @@
-Formal Grammar for tpt-telos (v0.1.0)
-====================================
+Formal Grammar for tpt-telos (v0.2.0)
+=======================================
 
 --------------------------------------------------------------------------------
 Language Feature Matrix
@@ -24,15 +24,29 @@ SUPPORTED (verifier + all backends):
   Nonlinear contracts     x * y < K        (verified via interval bounding when bounds present;
                                             marked [interval-bounded] in output)
 
+NEW IN v0.2.0 (koinon feature set):
+  Return types            func f(x: T) -> Result<T, E>  (generic return types)
+  Let bindings            let x [: Type] = expr;
+  Function calls          func_name(args) in expressions
+  Method calls            receiver.method(args)
+  Quantified invariants   forall x: Type [in domain] { expr }  (parser + codegen only)
+  Aggregate expressions   sum(expr), min(a, b), max(a, b), count(expr)
+  Mutable parameters      mut sender: Account
+  Control flow            if expr { stmts } [else { stmts }]
+                          if expr { expr } else { expr }  (expression form)
+                          match expr { pattern => expr, ... }
+  Struct definitions      struct Name { field: Type, ... }
+  Enum definitions        enum Name { Variant { field: Type }, Variant2, ... }
+  Error propagation       expr?
+  Patterns                literal | var | Constructor(fields...) | _
+
 PARTIAL / LIMITED:
   Logical disjunction     ||  parsed but rejected at IR lowering (Phase 6: DNF normalization)
   @state(...) semantics   parsed and forwarded to router; storage-class behavior not enforced
   Integer types only      Int / PositiveInt only; no Float32/Float64 (Phase 6)
+  Quantifier verification forall is parsed and codegen'd to runtime checks; no formal verification
 
 UNSUPPORTED (parse error or silent drop):
-  Control flow            if / while / match / for / break / continue
-  Function calls          calling other telos functions inside expressions
-  Generics                no type parameters (T<U>)
   Strings / booleans      no string or bool literal types
   Arrays / slices         no [T; N] or [T] (Phase 6)
   Cross-module refs       invariant types from other modules not referenceable (Phase 6)
@@ -66,36 +80,82 @@ Items
 
 item           ::= invariant
                  | func
+                 | struct_def
+                 | enum_def
 
 invariant      ::= "invariant" IDENT "{"
                        constraint ( ";" constraint )* ";"?
                    "}"
 
-func           ::= "func" IDENT "(" params? ")"
+func           ::= "func" IDENT "(" params? ")" [ "->" type ]
                        clause*
-                       block
+                       block | ";"
+
+struct_def     ::= "struct" IDENT "{"
+                       field_def ( "," field_def )* ","?
+                   "}"
+
+enum_def       ::= "enum" IDENT "{"
+                       variant_def ( "," variant_def )* ","?
+                   "}"
+
+variant_def    ::= IDENT [ "{" field_def ( "," field_def )* ","? "}" ]
+
+field_def      ::= IDENT ":" type
 
 params         ::= param ( "," param )*
 
-param          ::= IDENT ":" type
+param          ::= [ "mut" ] IDENT ":" type
 
 clause         ::= "requires" constraint
                  | "ensures"  constraint
 
 block          ::= "{" stmt* "}"
 
+--------------------------------------------------------------------------------
+Statements
+--------------------------------------------------------------------------------
+
 stmt           ::= "mutate" "state" "{" assign* "}"
+                 | "let" IDENT [ ":" type ] "=" expr ";"
+                 | if_stmt
+                 | "match" expr "{" match_arm_stmt* "}"
+                 | "return" [ expr ] ";"
                  | assign
+                 | expr "=" expr ";"
+                 | expr "+=" expr ";"
+                 | expr "-=" expr ";"
+                 | expr ";"               // expression statement
+
+if_stmt        ::= "if" expr "{" stmt* "}" [ "else" "{" stmt* "}" ]
+
+match_arm_stmt ::= pattern "=>" "{" stmt* "}"
+                 | pattern "=>" stmt
 
 assign         ::= target ( "=" | "+=" | "-=" ) expr ";"
 
 target         ::= expr        // must resolve to a field path, e.g. from.balance
 
 --------------------------------------------------------------------------------
-Types & Expressions
+Patterns
 --------------------------------------------------------------------------------
 
-type           ::= IDENT                // Wallet, PositiveInt, ...
+pattern        ::= INT
+                 | "-" INT
+                 | IDENT [ "(" pattern ( "," pattern )* ")" ]
+                 | "_"
+
+--------------------------------------------------------------------------------
+Types
+--------------------------------------------------------------------------------
+
+type           ::= IDENT                            // Named type
+                 | IDENT "<" type ( "," type )* ">"  // Generic type (e.g. Result<T, E>)
+                 | "(" type ( "," type )+ ")"        // Tuple type
+
+--------------------------------------------------------------------------------
+Expressions
+--------------------------------------------------------------------------------
 
 constraint     ::= expr                // a boolean expression (see below)
 
@@ -111,15 +171,34 @@ cmpOp          ::= "==" | "!=" | "<" | "<=" | ">" | ">="
 
 addExpr        ::= mulExpr ( ( "+" | "-" ) mulExpr )*
 
-mulExpr        ::= unary ( ( "*" | "/" ) unary )*
+mulExpr        ::= postfix ( ( "*" | "/" ) postfix )*
 
-unary          ::= "-" unary
-                 | primary
+postfix        ::= primary
+                 | postfix "(" arglist? ")"        // function / method call
+                 | postfix "." IDENT               // field access / method
+                 | postfix "[" expr "]"            // index
+                 | postfix "?"                     // try / error propagation
 
 primary        ::= INT
                  | "old" "(" expr ")"
-                 | IDENT [ "." IDENT ]           // var or field path
+                 | IDENT [ "." IDENT ]             // var or field path
                  | "(" expr ")"
+                 | if_expr
+                 | match_expr
+                 | "forall" IDENT ":" type [ "in" expr ] "{" expr "}"
+                 | aggregate_call
+                 | "Ok" "(" expr ")"
+                 | "Err" "(" expr ")"
+
+if_expr        ::= "if" expr "{" expr "}" "else" "{" expr "}"
+
+match_expr     ::= "match" expr "{"
+                       ( pattern "=>" expr ","? )*
+                   "}"
+
+aggregate_call ::= ( "sum" | "min" | "max" | "count" ) "(" arglist? ")"
+
+arglist        ::= expr ( "," expr )*
 
 --------------------------------------------------------------------------------
 Lexical rules
@@ -145,5 +224,26 @@ Semantics (summary)
   `requires` clauses and the `mutate state` assignments.
 
 * `old(e)` refers to the value of `e` in the pre-state.
+
+* `func f(x: T) -> Result<T, E>` declares a function with a generic return type.
+  The `?` operator desugars to match/return for error propagation.
+
+* `let x = e;` introduces a local binding; in IR this becomes `x == e`.
+
+* `func_name(args)` in an expression context calls a function. When used in
+  specifications, the call is substituted with the function's postconditions.
+
+* `forall x: T { body }` is a universal quantifier. Currently codegen'd to
+  runtime assertion loops; no formal verification.
+
+* `sum(xs)`, `min(a, b)`, `max(a, b)`, `count(xs)` are aggregate expressions.
+
+* `mut param: T` marks a parameter as mutable (passed by reference).
+
+* `struct Name { field: Type }` and `enum Name { Variant { ... } }` declare
+  named types. Inference also discovers types from field accesses.
+
+* `match expr { pattern => expr }` performs pattern matching. Exhaustiveness
+  is not enforced by the parser (a `_` wildcard is recommended).
 
 * No implicit type coercion and no hidden allocation: every operation is named.

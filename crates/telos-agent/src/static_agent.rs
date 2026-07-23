@@ -152,6 +152,9 @@ fn eval_post(e: &Expr, ce: &Model) -> i64 {
                 _ => 0,
             }
         }
+        // New expression kinds are not evaluable in the counterexample model;
+        // fall back to 0.
+        _ => 0,
     }
 }
 
@@ -182,6 +185,7 @@ fn eval_pre(e: &Expr, ce: &Model) -> i64 {
                 _ => 0,
             }
         }
+        _ => 0,
     }
 }
 
@@ -206,6 +210,7 @@ fn apply_fixes(stmts: &mut [Stmt], fixes: &HashMap<(String, String), Expr>) {
                     }
                 }
             }
+            _ => {}
         }
     }
 }

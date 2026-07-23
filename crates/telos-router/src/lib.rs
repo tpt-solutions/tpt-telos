@@ -412,15 +412,18 @@ mod tests {
     fn real_time_go_conflict_emits_diagnostic() {
         let (r, diags) = route_checked(&[attr(&["real_time", "network_io"])], "ControlLoop");
         assert_eq!(r.target, Target::Go);
-        assert!(diags.iter().any(|d| d.kind == DiagnosticKind::RealTimeGoConflict));
+        assert!(diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::RealTimeGoConflict));
     }
 
     #[test]
     fn zero_alloc_go_conflict_emits_diagnostic() {
-        let (r, diags) =
-            route_checked(&[attr(&["zero_allocation", "high_concurrency"])], "Buffer");
+        let (r, diags) = route_checked(&[attr(&["zero_allocation", "high_concurrency"])], "Buffer");
         assert_eq!(r.target, Target::Go);
-        assert!(diags.iter().any(|d| d.kind == DiagnosticKind::ZeroAllocGoConflict));
+        assert!(diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::ZeroAllocGoConflict));
     }
 
     #[test]

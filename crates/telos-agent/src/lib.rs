@@ -354,6 +354,48 @@ fn render_stmt(s: &Stmt) -> String {
             format!("mutate state {{\n{}\n}}", indent(&inner))
         }
         Stmt::Assign(a) => render_assign(a),
+        Stmt::Let(lb) => {
+            let ty = lb
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", render_type(t)))
+                .unwrap_or_default();
+            format!("let {}{} = {};", lb.name, ty, pretty(&lb.value))
+        }
+        Stmt::If(is) => {
+            let mut out = format!("if {} {{\n", pretty(&is.condition));
+            for s in &is.then_body {
+                out.push_str(&indent(&render_stmt(s)));
+                out.push('\n');
+            }
+            out.push('}');
+            if let Some(else_body) = &is.else_body {
+                out.push_str(" else {\n");
+                for s in else_body {
+                    out.push_str(&indent(&render_stmt(s)));
+                    out.push('\n');
+                }
+                out.push('}');
+            }
+            out
+        }
+        Stmt::Match(ms) => {
+            let mut out = format!("match {} {{\n", pretty(&ms.scrutinee));
+            for arm in &ms.arms {
+                out.push_str(&format!("    {} => {{\n", render_pattern(&arm.pattern)));
+                for s in &arm.body {
+                    out.push_str(&indent(&render_stmt(s)));
+                    out.push('\n');
+                }
+                out.push_str("    }\n");
+            }
+            out.push('}');
+            out
+        }
+        Stmt::Return(e) => match e {
+            Some(expr) => format!("return {};", pretty(expr)),
+            None => "return;".to_string(),
+        },
     }
 }
 
@@ -392,6 +434,76 @@ fn pretty(e: &Expr) -> String {
             };
             format!("{} {} {}", pretty(lhs), s, pretty(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(pretty).collect();
+            format!("{}({})", c.func, args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(pretty).collect();
+            format!("{}.{}({})", pretty(&m.receiver), m.method, args.join(", "))
+        }
+        Expr::Index(i) => format!("{}[{}]", pretty(&i.receiver), pretty(&i.index)),
+        Expr::If(i) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            pretty(&i.condition),
+            pretty(&i.then_expr),
+            pretty(&i.else_expr)
+        ),
+        Expr::Match(m) => {
+            let arms: Vec<_> = m
+                .arms
+                .iter()
+                .map(|a| format!("... => {}", pretty(&a.expr)))
+                .collect();
+            format!("match {} {{ {} }}", pretty(&m.scrutinee), arms.join(", "))
+        }
+        Expr::Try(e) => format!("{}?", pretty(e)),
+        Expr::Forall(f) => format!(
+            "forall {}: {} {{ {} }}",
+            f.var,
+            f.var_ty.name(),
+            pretty(&f.body)
+        ),
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(pretty).collect();
+            let op = match a.op {
+                AggregateOp::Sum => "sum",
+                AggregateOp::Min => "min",
+                AggregateOp::Max => "max",
+                AggregateOp::Count => "count",
+            };
+            format!("{}({})", op, args.join(", "))
+        }
+    }
+}
+
+fn render_type(t: &Type) -> String {
+    match t {
+        Type::Named(s) => s.clone(),
+        Type::Generic(name, args) => {
+            let args: Vec<_> = args.iter().map(render_type).collect();
+            format!("{}<{}>", name, args.join(", "))
+        }
+        Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(render_type).collect();
+            format!("({})", elems.join(", "))
+        }
+    }
+}
+
+fn render_pattern(p: &Pattern) -> String {
+    match p {
+        Pattern::Literal(n) => n.to_string(),
+        Pattern::Var(v) => v.clone(),
+        Pattern::Constructor(name, fields) => {
+            if fields.is_empty() {
+                name.clone()
+            } else {
+                let fields: Vec<_> = fields.iter().map(render_pattern).collect();
+                format!("{}({})", name, fields.join(", "))
+            }
+        }
+        Pattern::Wildcard => "_".to_string(),
     }
 }
 
