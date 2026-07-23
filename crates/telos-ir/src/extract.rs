@@ -653,19 +653,22 @@ fn combine_dnf(a: &[Vec<Constraint>], b: &[Vec<Constraint>]) -> Vec<Vec<Constrai
     out
 }
 
-/// Negate a single relation (`x R y` -> `x (not R) y`), splitting `Eq`/`Ne`
-/// into their two-branch disjunctive negation like `solver::negate` does.
-fn negate_relation_branches(diff: &Linear, rel: Relation) -> Vec<Constraint> {
+/// Negate a single relation as one constraint (`x R y` -> `x (not R) y`).
+/// Unlike `solver::negate` (which splits `Eq`'s negation into `Lt || Gt`
+/// because the solver needs concrete leaf relations to check unsatisfiability
+/// of each disjunct), this uses `Relation::Ne` directly for `Eq`'s negation:
+/// the Fourier-Motzkin solver treats `Ne` premises as a no-op (sound but
+/// uninformative) rather than a relation it needs to case-split on, so one
+/// branch here avoids needlessly doubling the number of body-mutation
+/// branches for a plain `if x == y`/`if x != y` condition.
+fn negate_relation(rel: &Relation) -> Relation {
     match rel {
-        Relation::Eq => vec![
-            Constraint(diff.clone(), Relation::Lt),
-            Constraint(diff.clone(), Relation::Gt),
-        ],
-        Relation::Ne => vec![Constraint(diff.clone(), Relation::Eq)],
-        Relation::Le => vec![Constraint(diff.clone(), Relation::Gt)],
-        Relation::Lt => vec![Constraint(diff.clone(), Relation::Ge)],
-        Relation::Ge => vec![Constraint(diff.clone(), Relation::Lt)],
-        Relation::Gt => vec![Constraint(diff.clone(), Relation::Le)],
+        Relation::Eq => Relation::Ne,
+        Relation::Ne => Relation::Eq,
+        Relation::Le => Relation::Gt,
+        Relation::Lt => Relation::Ge,
+        Relation::Ge => Relation::Lt,
+        Relation::Gt => Relation::Le,
     }
 }
 
@@ -775,8 +778,9 @@ fn process_body_stmts(
                         ));
                     }
                 };
-                let cond_c = Constraint(diff.clone(), rel.clone());
-                let not_cond_cs = negate_relation_branches(&diff, rel);
+                let not_rel = negate_relation(&rel);
+                let cond_c = Constraint(diff.clone(), rel);
+                let not_cond_c = Constraint(diff.clone(), not_rel);
 
                 let mut then_branches: Vec<BodyBranch> = branches
                     .iter()
@@ -793,31 +797,24 @@ fn process_body_stmts(
                 then_branches =
                     process_body_stmts(&if_stmt.then_body, then_branches, field_fn, var_fn)?;
 
-                // The negation may itself be a disjunction (e.g. `!=` negates
-                // to `==`, but `==` negates to `< || >`) — fan out one else
-                // branch per negation disjunct.
-                let mut else_branches: Vec<BodyBranch> = Vec::new();
-                for not_cond_c in &not_cond_cs {
-                    let guarded: Vec<BodyBranch> = branches
-                        .iter()
-                        .map(|b| BodyBranch {
-                            extra_premises: {
-                                let mut p = b.extra_premises.clone();
-                                p.push(not_cond_c.clone());
-                                p
-                            },
-                            mutations: b.mutations.clone(),
-                            assigned: b.assigned.clone(),
-                        })
-                        .collect();
-                    let processed = process_body_stmts(
-                        if_stmt.else_body.as_deref().unwrap_or(&[]),
-                        guarded,
-                        field_fn,
-                        var_fn,
-                    )?;
-                    else_branches.extend(processed);
-                }
+                let else_branches: Vec<BodyBranch> = branches
+                    .iter()
+                    .map(|b| BodyBranch {
+                        extra_premises: {
+                            let mut p = b.extra_premises.clone();
+                            p.push(not_cond_c.clone());
+                            p
+                        },
+                        mutations: b.mutations.clone(),
+                        assigned: b.assigned.clone(),
+                    })
+                    .collect();
+                let else_branches = process_body_stmts(
+                    if_stmt.else_body.as_deref().unwrap_or(&[]),
+                    else_branches,
+                    field_fn,
+                    var_fn,
+                )?;
 
                 then_branches.extend(else_branches);
                 branches = then_branches;
@@ -1302,7 +1299,10 @@ fn build_problems(
             branch.extend(body_branch.extra_premises.iter().cloned());
             branch.extend(body_branch.mutations.iter().cloned());
             for (base, field) in &referenced {
-                if !body_branch.assigned.contains(&(base.clone(), field.clone())) {
+                if !body_branch
+                    .assigned
+                    .contains(&(base.clone(), field.clone()))
+                {
                     let post = Linear::var(&post_field(base, field));
                     let pre = Linear::var(&pre_field(base, field));
                     branch.push(Constraint(post.sub(&pre), Relation::Eq));
@@ -1323,7 +1323,13 @@ fn build_problems(
         let mut next_or_group: usize = 0;
         for (i, e) in func.ensures.iter().enumerate() {
             let mut approximated = false;
-            let dnf = to_constraints_bounded_dnf(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
+            let dnf = to_constraints_bounded_dnf(
+                e,
+                &post_fn,
+                &var_fn,
+                &premise_bounds,
+                &mut approximated,
+            )?;
             let location = func.ensures_spans.get(i).copied().unwrap_or(func.span);
             if dnf.len() == 1 {
                 // Single branch (conjunction) — one conclusion.
@@ -1346,11 +1352,7 @@ fn build_problems(
                 for (branch_idx, branch) in dnf.iter().enumerate() {
                     for c in branch {
                         conclusions.push(Conclusion {
-                            description: format!(
-                                "ensures: {} [branch {}]",
-                                pretty(e),
-                                branch_idx
-                            ),
+                            description: format!("ensures: {} [branch {}]", pretty(e), branch_idx),
                             constraint: c.clone(),
                             is_ensures: true,
                             is_approximation: approximated,

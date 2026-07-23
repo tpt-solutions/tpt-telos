@@ -53,8 +53,20 @@ fn disjunction_example_passes() {
     let src = std::fs::read_to_string("../../examples/disjunction.telos").unwrap();
     let modules = parse(&src).unwrap();
     let problems = extract(&modules).unwrap();
-    // Disjunction in requires produces 2 premise branches → 2 problems.
-    assert_eq!(problems.len(), 2, "expected 2 problems from requires disjunction");
+    // Disjunction in `requires` produces 2 premise branches (`flag == 1` /
+    // `flag == 2`); the function body's own `if flag == 1 { .. } else { .. }`
+    // produces 2 more (guarded by the condition and its negation). Every
+    // premise branch is paired with every body branch, so this is 2 * 2 = 4
+    // problems — two of them (`flag == 1` paired with the mutation-`else`
+    // guard, and vice versa) have contradictory premises and verify
+    // vacuously, since this extraction layer doesn't prune infeasible
+    // branches (that would require calling back into the solver, which
+    // `telos-ir` doesn't depend on). All 4 must still verify.
+    assert_eq!(
+        problems.len(),
+        4,
+        "expected 4 problems: 2 requires-branches * 2 body if/else-branches"
+    );
 
     for p in &problems {
         eprintln!("=== {} ===", p.func_name);
@@ -76,8 +88,7 @@ fn disjunction_example_passes() {
         assert!(
             r.all_passed,
             "{} should verify (disjunction ensures), got {:?}",
-            p.func_name,
-            r
+            p.func_name, r
         );
     }
 }
