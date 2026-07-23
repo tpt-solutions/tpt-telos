@@ -238,6 +238,7 @@ mod tests {
                 passed: verified,
                 is_ensures: true,
                 is_approximation: false,
+                counterexample: None,
             })
             .collect();
         let all_passed = checks_vec.iter().all(|c| c.passed);

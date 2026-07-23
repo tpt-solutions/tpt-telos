@@ -85,8 +85,9 @@ fn generate_py_module(
         }
         out.push_str("@dataclass\n");
         out.push_str(&format!("class {}:\n", ty));
-        for f in fields {
-            out.push_str(&format!("    {}: {} = 0\n", f, int_type));
+        for (f, fty) in fields {
+            let py_type = render_py_type(fty, int_type);
+            out.push_str(&format!("    {}: {} = 0\n", f, py_type));
         }
         out.push('\n');
 
@@ -128,6 +129,33 @@ fn generate_py_module(
     }
 
     out
+}
+
+fn render_py_type(ty: &tpt_telos_parser::ast::Type, int_type: &str) -> String {
+    match ty {
+        tpt_telos_parser::ast::Type::Named(s) => match s.as_str() {
+            "Float32" => "float".to_string(),
+            "Float64" => "float".to_string(),
+            "Int" | "PositiveInt" => int_type.to_string(),
+            "Bool" => "bool".to_string(),
+            "String" => "str".to_string(),
+            other => other.to_string(),
+        },
+        tpt_telos_parser::ast::Type::Generic(name, args) => {
+            let args: Vec<_> = args.iter().map(|a| render_py_type(a, int_type)).collect();
+            format!("{}[{}]", name, args.join(", "))
+        }
+        tpt_telos_parser::ast::Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(|e| render_py_type(e, int_type)).collect();
+            format!("tuple[{}]", elems.join(", "))
+        }
+        tpt_telos_parser::ast::Type::Array(elem, len) => {
+            format!("list[{}]  # length {}", render_py_type(elem, int_type), len)
+        }
+        tpt_telos_parser::ast::Type::Slice(elem) => {
+            format!("list[{}]", render_py_type(elem, int_type))
+        }
+    }
 }
 
 fn render_py_func(f: &Func, stmts: &[Stmt], types: &TypeFields, int_type: &str) -> String {

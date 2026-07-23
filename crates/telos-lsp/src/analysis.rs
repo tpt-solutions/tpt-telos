@@ -36,6 +36,8 @@ pub struct FuncReport {
     pub ejected: bool,
     pub verified: bool,
     pub failures: Vec<String>,
+    /// Counterexamples for failed checks: `(description, model)`.
+    pub counterexamples: Vec<(String, std::collections::HashMap<String, i64>)>,
     pub line: usize,
 }
 
@@ -71,19 +73,28 @@ pub fn analyze(text: &str) -> Result<Vec<FuncReport>, String> {
         for item in &m.items {
             if let Item::Func(f) = item {
                 let problem = problems.iter().find(|p| p.func_name == f.name);
-                let (verified, failures) = match problem {
+                let (verified, failures, counterexamples) = match problem {
                     Some(p) => {
                         let r = tpt_telos_verifier::verify(p);
-                        (
-                            r.all_passed,
-                            r.checks
-                                .iter()
-                                .filter(|c| !c.passed)
-                                .map(|c| c.description.clone())
-                                .collect::<Vec<_>>(),
-                        )
+                        let fails: Vec<String> = r
+                            .checks
+                            .iter()
+                            .filter(|c| !c.passed)
+                            .map(|c| c.description.clone())
+                            .collect();
+                        let ces: Vec<(String, std::collections::HashMap<String, i64>)> = r
+                            .checks
+                            .iter()
+                            .filter(|c| !c.passed)
+                            .filter_map(|c| {
+                                c.counterexample
+                                    .as_ref()
+                                    .map(|ce| (c.description.clone(), ce.clone()))
+                            })
+                            .collect();
+                        (r.all_passed, fails, ces)
                     }
-                    None => (true, Vec::new()),
+                    None => (true, Vec::new(), Vec::new()),
                 };
                 reports.push(FuncReport {
                     module: m.name.clone(),
@@ -95,6 +106,7 @@ pub fn analyze(text: &str) -> Result<Vec<FuncReport>, String> {
                     ejected: f.is_ejected(),
                     verified,
                     failures,
+                    counterexamples,
                     line: find_func_line(text, &f.name),
                 });
             }
@@ -160,14 +172,22 @@ pub fn diagnostics(text: &str) -> Vec<Diagnostic> {
                     (SEVERITY_ERROR, "contract not satisfied")
                 };
                 let end = line_len(text, r.line);
+                // Find counterexample descriptions that match this failure.
+                let mut ce_iter = r.counterexamples.iter();
                 for fail in &r.failures {
+                    let mut msg = format!("{}: {}", prefix, fail);
+                    if let Some((_, ce)) = ce_iter.find(|(desc, _)| desc == fail) {
+                        let bindings: Vec<_> =
+                            ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                        msg.push_str(&format!(" — counterexample: {{{}}}", bindings.join(", ")));
+                    }
                     diags.push(Diagnostic {
                         line: r.line,
                         character: 0,
                         end_line: r.line,
                         end_character: end,
                         severity,
-                        message: format!("{}: {}", prefix, fail),
+                        message: msg,
                     });
                 }
             }
@@ -240,6 +260,13 @@ pub fn hover_markdown(text: &str, line: usize, character: usize) -> Option<Strin
         md.push_str("\n**unsatisfied**\n");
         for f in &report.failures {
             md.push_str(&format!("- `{}`\n", f));
+        }
+        if !report.counterexamples.is_empty() {
+            md.push_str("\n**counterexamples**\n");
+            for (desc, ce) in &report.counterexamples {
+                let bindings: Vec<_> = ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                md.push_str(&format!("- `{}` => {{{}}}\n", desc, bindings.join(", ")));
+            }
         }
     }
     Some(md)
@@ -410,5 +437,6 @@ fn pretty_expr(e: &Expr) -> String {
             let args: Vec<_> = a.args.iter().map(pretty_expr).collect();
             format!("{}({})", a.op.op_name(), args.join(", "))
         }
+        Expr::Range { lo, hi } => format!("{}..{}", pretty_expr(lo), pretty_expr(hi)),
     }
 }

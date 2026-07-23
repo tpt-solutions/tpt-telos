@@ -147,7 +147,12 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Command::Build { file, out_dir, llm, solver } => match run_build(&file, &out_dir, llm, &solver) {
+        Command::Build {
+            file,
+            out_dir,
+            llm,
+            solver,
+        } => match run_build(&file, &out_dir, llm, &solver) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -245,9 +250,7 @@ fn run_verify(file: &str, solver: &str) -> Result<bool, String> {
                 if !tpt_telos_verifier::z3_solver::is_z3_available() {
                     eprintln!("warning: Z3 not found at runtime; falling back to Fourier-Motzkin");
                 } else {
-                    tpt_telos_verifier::set_solver_backend(
-                        tpt_telos_verifier::SolverBackend::Z3,
-                    );
+                    tpt_telos_verifier::set_solver_backend(tpt_telos_verifier::SolverBackend::Z3);
                 }
             }
             #[cfg(not(feature = "z3"))]
@@ -284,6 +287,10 @@ fn run_verify(file: &str, solver: &str) -> Result<bool, String> {
             println!("    [{}] {}{}{}", tag, kind, check.description, approx);
             if !check.passed {
                 overall = false;
+                if let Some(ce) = &check.counterexample {
+                    let bindings: Vec<_> = ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                    println!("      counterexample: {{{}}}", bindings.join(", "));
+                }
             }
         }
         let status = if result.all_passed { "PASS" } else { "FAIL" };
@@ -387,9 +394,7 @@ fn run_build(file: &str, out_dir: &str, llm: bool, solver: &str) -> Result<bool,
                 if !tpt_telos_verifier::z3_solver::is_z3_available() {
                     eprintln!("warning: Z3 not found at runtime; falling back to Fourier-Motzkin");
                 } else {
-                    tpt_telos_verifier::set_solver_backend(
-                        tpt_telos_verifier::SolverBackend::Z3,
-                    );
+                    tpt_telos_verifier::set_solver_backend(tpt_telos_verifier::SolverBackend::Z3);
                 }
             }
             #[cfg(not(feature = "z3"))]
@@ -1037,6 +1042,7 @@ fn pretty_expr(e: &Expr) -> String {
             let args: Vec<_> = a.args.iter().map(pretty_expr).collect();
             format!("{}({})", a.op.op_name(), args.join(", "))
         }
+        Expr::Range { lo, hi } => format!("{}..{}", pretty_expr(lo), pretty_expr(hi)),
     }
 }
 

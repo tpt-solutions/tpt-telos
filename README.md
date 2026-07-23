@@ -16,6 +16,14 @@ Every `func` carries `requires`/`ensures` contracts that are extracted to
 Fourier–Motzkin SMT-style solver — **no external Z3 dependency** is required to
 build or run.
 
+> **Status:** the parser/grammar already accept a richer language surface
+> (generics, tuples, `struct`/`enum` definitions, calls, `if`/`match`/`forall`/
+> aggregate expressions) than the verifier and code generators currently act
+> on end-to-end, and `telos verify` doesn't yet print *why* a contract failed
+> (no counterexample in its output, unlike `telos transpile`). Closing these
+> gaps is tracked as Phase 7 in [`TODO.md`](TODO.md) — check there before
+> relying on any of the newer constructs.
+
 ## Install
 
 ```sh

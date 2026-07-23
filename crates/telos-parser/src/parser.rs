@@ -836,6 +836,14 @@ impl Parser {
                     self.advance();
                     expr = Expr::Try(Box::new(expr));
                 }
+                Token::DotDot => {
+                    self.advance();
+                    let hi = self.parse_expr()?;
+                    expr = Expr::Range {
+                        lo: Box::new(expr),
+                        hi: Box::new(hi),
+                    };
+                }
                 _ => break,
             }
         }
@@ -1008,6 +1016,7 @@ fn pretty_simple(e: &Expr) -> String {
         Expr::Try(inner) => format!("{}?", pretty_simple(inner)),
         Expr::Forall(_) => "<forall>".to_string(),
         Expr::Aggregate(a) => format!("{}(...)", a.op.op_name()),
+        Expr::Range { .. } => "<range>".to_string(),
     }
 }
 

@@ -89,26 +89,32 @@ fn generate_module(
         "// ===== module {} (target: {}, storage: {}) =====\n",
         module.name,
         route.target.as_str(),
-        if is_persistent { "persistent" } else { "ephemeral" }
+        if is_persistent {
+            "persistent"
+        } else {
+            "ephemeral"
+        }
     ));
 
     // Structs.
-    let mut tys: Vec<(&String, &std::collections::BTreeSet<String>)> = types.iter().collect();
+    let mut tys: Vec<(&String, &Vec<(String, tpt_telos_parser::ast::Type)>)> =
+        types.iter().collect();
     tys.sort_by(|a, b| a.0.cmp(b.0));
     for (ty, fields) in tys {
         if fields.is_empty() {
             continue;
         }
         out.push_str(&format!("type {} struct {{\n", ty));
-        for f in fields {
+        for (f, fty) in fields {
             if is_persistent {
                 out.push_str(&format!(
-                    "\t{} int64 `json:\"{}\"`\n",
+                    "\t{} {} `json:\"{}\"`\n",
                     exported(f),
+                    render_type_go(fty),
                     f
                 ));
             } else {
-                out.push_str(&format!("\t{} int64\n", exported(f)));
+                out.push_str(&format!("\t{} {}\n", exported(f), render_type_go(fty)));
             }
         }
         out.push_str("}\n\n");
@@ -229,7 +235,42 @@ pub(crate) fn render_func_named(
                     out.push('\n');
                 }
             }
-            _ => {}
+            Stmt::Let(lb) => {
+                let ty = render_type_go(&lb.ty.clone().unwrap_or(Type::int()));
+                out.push_str(&format!(
+                    "\t{} := {}({})\n",
+                    lb.name,
+                    ty,
+                    render_expr(&lb.value)
+                ));
+            }
+            Stmt::If(is) => {
+                out.push_str(&format!("\tif {} {{\n", render_expr(&is.condition)));
+                for s in &is.then_body {
+                    render_go_stmt_indented(s, &mut out, 2);
+                }
+                if let Some(else_body) = &is.else_body {
+                    out.push_str("\t} else {\n");
+                    for s in else_body {
+                        render_go_stmt_indented(s, &mut out, 2);
+                    }
+                }
+                out.push_str("\t}\n");
+            }
+            Stmt::Match(ms) => {
+                out.push_str(&format!("\tswitch {} {{\n", render_expr(&ms.scrutinee)));
+                for arm in &ms.arms {
+                    out.push_str(&format!("\tcase {}:\n", render_go_pattern(&arm.pattern)));
+                    for s in &arm.body {
+                        render_go_stmt_indented(s, &mut out, 2);
+                    }
+                }
+                out.push_str("\t}\n");
+            }
+            Stmt::Return(e) => match e {
+                Some(expr) => out.push_str(&format!("\treturn {}\n", render_expr(expr))),
+                None => out.push_str("\treturn\n"),
+            },
         }
     }
 
@@ -296,7 +337,31 @@ pub(crate) fn render_expr(e: &Expr) -> String {
                 render_expr(&i.else_expr)
             )
         }
-        Expr::Try(e) => format!("{}_Must{}", render_expr(e), "_TODO"),
+        Expr::Try(e) => {
+            // Go error handling via IIFE: wrap the call in an anonymous
+            // function that checks the error and panics (contracts guarantee
+            // no error on verified paths).
+            match &**e {
+                Expr::Call(c) => {
+                    let args: Vec<_> = c.args.iter().map(render_expr).collect();
+                    format!(
+                        "(func() int64 {{ v, err := {}({}); if err != nil {{ panic(err) }}; return v }})()",
+                        exported(&c.func),
+                        args.join(", ")
+                    )
+                }
+                Expr::MethodCall(m) => {
+                    let args: Vec<_> = m.args.iter().map(render_expr).collect();
+                    format!(
+                        "(func() int64 {{ v, err := {}.{}({}); if err != nil {{ panic(err) }}; return v }})()",
+                        render_expr(&m.receiver),
+                        exported(&m.method),
+                        args.join(", ")
+                    )
+                }
+                _ => "(func() int64 { panic(\"try on non-call\") })()".to_string(),
+            }
+        }
         Expr::Forall(f) => {
             // Quantifiers are not natively supported in Go; emit a comment.
             format!("/* forall {}: {} */", f.var, render_type_go(&f.var_ty))
@@ -365,5 +430,80 @@ pub(crate) fn render_type_go(t: &Type) -> String {
         }
         Type::Array(elem, len) => format!("[{}]{}", len, render_type_go(elem)),
         Type::Slice(elem) => format!("[]{}", render_type_go(elem)),
+    }
+}
+
+fn render_go_stmt_indented(s: &Stmt, out: &mut String, indent: usize) {
+    let prefix = "\t".repeat(indent);
+    match s {
+        Stmt::MutateState(assigns) => {
+            for a in assigns {
+                out.push_str(&format!("{}{}\n", prefix, render_assign(a)));
+            }
+        }
+        Stmt::Assign(a) => {
+            out.push_str(&format!("{}{}\n", prefix, render_assign(a)));
+        }
+        Stmt::Let(lb) => {
+            let ty = render_type_go(&lb.ty.clone().unwrap_or(Type::int()));
+            out.push_str(&format!(
+                "{}{} := {}({})\n",
+                prefix,
+                lb.name,
+                ty,
+                render_expr(&lb.value)
+            ));
+        }
+        Stmt::If(is) => {
+            out.push_str(&format!("{}if {} {{\n", prefix, render_expr(&is.condition)));
+            for s in &is.then_body {
+                render_go_stmt_indented(s, out, indent + 1);
+            }
+            if let Some(else_body) = &is.else_body {
+                out.push_str(&format!("{}}} else {{\n", prefix));
+                for s in else_body {
+                    render_go_stmt_indented(s, out, indent + 1);
+                }
+            }
+            out.push_str(&format!("{}}}\n", prefix));
+        }
+        Stmt::Match(ms) => {
+            out.push_str(&format!(
+                "{}switch {} {{\n",
+                prefix,
+                render_expr(&ms.scrutinee)
+            ));
+            for arm in &ms.arms {
+                out.push_str(&format!(
+                    "{}case {}:\n",
+                    prefix,
+                    render_go_pattern(&arm.pattern)
+                ));
+                for s in &arm.body {
+                    render_go_stmt_indented(s, out, indent + 1);
+                }
+            }
+            out.push_str(&format!("{}}}\n", prefix));
+        }
+        Stmt::Return(e) => match e {
+            Some(expr) => out.push_str(&format!("{}return {}\n", prefix, render_expr(expr))),
+            None => out.push_str(&format!("{}return\n", prefix)),
+        },
+    }
+}
+
+fn render_go_pattern(p: &Pattern) -> String {
+    match p {
+        Pattern::Literal(n) => n.to_string(),
+        Pattern::Var(v) => v.clone(),
+        Pattern::Constructor(name, fields) => {
+            if fields.is_empty() {
+                exported(name)
+            } else {
+                let fs: Vec<_> = fields.iter().map(render_go_pattern).collect();
+                format!("{}({})", exported(name), fs.join(", "))
+            }
+        }
+        Pattern::Wildcard => "_".to_string(),
     }
 }

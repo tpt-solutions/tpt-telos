@@ -385,6 +385,11 @@ pub enum Expr {
     Forall(ForallExpr),
     /// An aggregate expression: `sum(expr)`, `min(a, b)`, etc.
     Aggregate(AggregateExpr),
+    /// A range expression: `lo..hi` (exclusive upper bound).
+    Range {
+        lo: Box<Expr>,
+        hi: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

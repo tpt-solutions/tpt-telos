@@ -9,32 +9,27 @@
 //! engine. When the `z3` feature is enabled, an alternative Z3-backed solver
 //! is available via [`SolverBackend::Z3`].
 
+pub mod cluster;
 pub mod solver;
 pub mod verify;
-pub mod cluster;
 
 #[cfg(feature = "z3")]
 pub mod z3_solver;
 
-pub use solver::{counterexample, entails, model, satisfies_model, unsat, Model};
+pub use solver::{counterexample, entails, model, negate, satisfies_model, unsat, Model};
 pub use verify::{is_unsat, verify, CheckResult, VerificationResult};
 
 /// The solver backend to use for verification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SolverBackend {
     /// Built-in Fourier-Motzkin variable elimination (default, no external
     /// dependencies).
+    #[default]
     FourierMotzkin,
     /// Z3 SMT solver (requires the `z3` feature and the Z3 shared library
     /// to be installed).
     #[cfg(feature = "z3")]
     Z3,
-}
-
-impl Default for SolverBackend {
-    fn default() -> Self {
-        SolverBackend::FourierMotzkin
-    }
 }
 
 /// Global solver backend setting. Defaults to Fourier-Motzkin.

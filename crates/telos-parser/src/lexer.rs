@@ -36,6 +36,7 @@ pub enum Token {
     Arrow,      // ->
     FatArrow,   // =>
     Question,   // ?
+    DotDot,     // ..
     UnderScore, // _
     KwModule,
     KwInvariant,
@@ -77,6 +78,7 @@ impl fmt::Display for Token {
             Token::Comma => ",",
             Token::Colon => ":",
             Token::Dot => ".",
+            Token::DotDot => "..",
             Token::Semicolon => ";",
             Token::Assign => "=",
             Token::PlusAssign => "+=",
@@ -284,7 +286,14 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
             ']' => Token::RSquare,
             ',' => Token::Comma,
             ':' => Token::Colon,
-            '.' => Token::Dot,
+            '.' => {
+                if i + 1 < chars.len() && chars[i + 1] == '.' {
+                    i += 1;
+                    Token::DotDot
+                } else {
+                    Token::Dot
+                }
+            }
             ';' => Token::Semicolon,
             '=' => Token::Assign,
             '+' => Token::Plus,

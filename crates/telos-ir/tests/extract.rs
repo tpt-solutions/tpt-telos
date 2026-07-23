@@ -284,10 +284,7 @@ fn extract_cross_module_invariant_reference() {
     // This means the premises include `w.balance >= 0` (from the invariant).
     assert!(
         probs[0].premises.iter().any(|c| {
-            c.0.terms
-                .iter()
-                .any(|(v, _)| v == "w.balance")
-                && c.1 == tpt_telos_ir::Relation::Ge
+            c.0.terms.iter().any(|(v, _)| v == "w.balance") && c.1 == tpt_telos_ir::Relation::Ge
         }),
         "expected cross-module invariant premise w.balance >= 0: {:?}",
         probs[0].premises

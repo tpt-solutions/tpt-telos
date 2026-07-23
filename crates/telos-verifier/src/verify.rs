@@ -1,6 +1,9 @@
 //! Top-level verification driver over a `VerificationProblem`.
 
-use crate::solver::{entails, unsat};
+#[cfg(feature = "z3")]
+use crate::solver::negate;
+use crate::solver::{counterexample, entails, unsat, Model};
+use crate::SolverBackend;
 use tpt_telos_ir::{Constraint, VerificationProblem};
 
 /// The outcome of verifying one conclusion (an `ensures` clause or invariant).
@@ -13,6 +16,11 @@ pub struct CheckResult {
     /// constraint was proved via interval-arithmetic bounding of a nonlinear
     /// product rather than exact linear arithmetic.
     pub is_approximation: bool,
+    /// A concrete variable assignment that satisfies the premises but
+    /// violates this conclusion. Only populated when `passed` is false, and
+    /// only when the solver could construct one (always possible for the
+    /// linear cases this verifier handles).
+    pub counterexample: Option<Model>,
 }
 
 /// The aggregate verification result for a single function.
@@ -21,6 +29,42 @@ pub struct VerificationResult {
     pub func_name: String,
     pub checks: Vec<CheckResult>,
     pub all_passed: bool,
+}
+
+/// Dispatch check to the configured solver backend.
+fn check_entails(premises: &[Constraint], concl: &Constraint) -> bool {
+    match crate::solver_backend() {
+        SolverBackend::FourierMotzkin => entails(premises, concl),
+        #[cfg(feature = "z3")]
+        SolverBackend::Z3 => {
+            for branch in negate(concl) {
+                let mut cs = premises.to_vec();
+                cs.extend(branch);
+                if !crate::z3_solver::z3_unsat(&cs) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+}
+
+/// Dispatch counterexample extraction to the configured solver backend.
+fn check_counterexample(premises: &[Constraint], concl: &Constraint) -> Option<Model> {
+    match crate::solver_backend() {
+        SolverBackend::FourierMotzkin => counterexample(premises, concl),
+        #[cfg(feature = "z3")]
+        SolverBackend::Z3 => {
+            for branch in negate(concl) {
+                let mut cs = premises.to_vec();
+                cs.extend(branch);
+                if let Some(m) = crate::z3_solver::z3_model(&cs) {
+                    return Some(m);
+                }
+            }
+            None
+        }
+    }
 }
 
 /// Verify every conclusion of a single function.
@@ -61,15 +105,19 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
         if concl.or_group.is_some() {
             continue; // handled in second pass
         }
-        let passed = entails(&problem.premises, &concl.constraint);
-        if !passed {
+        let passed = check_entails(&problem.premises, &concl.constraint);
+        let ce = if passed {
+            None
+        } else {
             all_passed = false;
-        }
+            check_counterexample(&problem.premises, &concl.constraint)
+        };
         checks.push(CheckResult {
             description: concl.description.clone(),
             passed,
             is_ensures: concl.is_ensures,
             is_approximation: concl.is_approximation,
+            counterexample: ce,
         });
     }
 
@@ -79,21 +127,27 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
     for concl in &problem.conclusions {
         if let Some(g) = concl.or_group {
             groups.entry(g).or_default().push(concl);
-    }
+        }
     }
     for (_group_id, group_conclusions) in &groups {
         let mut any_passed = false;
         let mut group_results: Vec<CheckResult> = Vec::new();
         for concl in group_conclusions {
-            let passed = entails(&problem.premises, &concl.constraint);
+            let passed = check_entails(&problem.premises, &concl.constraint);
             if passed {
                 any_passed = true;
             }
+            let ce = if passed {
+                None
+            } else {
+                check_counterexample(&problem.premises, &concl.constraint)
+            };
             group_results.push(CheckResult {
                 description: concl.description.clone(),
                 passed,
                 is_ensures: concl.is_ensures,
                 is_approximation: concl.is_approximation,
+                counterexample: ce,
             });
         }
         if !any_passed {
@@ -122,5 +176,9 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
 /// assert!(is_unsat(&[ge1, le0]));
 /// ```
 pub fn is_unsat(cs: &[Constraint]) -> bool {
-    unsat(cs)
+    match crate::solver_backend() {
+        SolverBackend::FourierMotzkin => unsat(cs),
+        #[cfg(feature = "z3")]
+        SolverBackend::Z3 => crate::z3_solver::z3_unsat(cs),
+    }
 }

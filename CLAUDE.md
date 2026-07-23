@@ -48,7 +48,10 @@ Eight crates under `crates/`, each with a focused responsibility in the pipeline
 
 - **tpt-telos-parser** — hand-written lexer/parser/AST for `.telos` source. Grammar is the source of truth
   at `crates/telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
-  the language changes.
+  the language changes. The AST also covers generics, tuples, `struct`/`enum` definitions, calls,
+  and control-flow expressions (`if`/`match`/`forall`/aggregates/`?`) — see the caveat below: this
+  parses today, but `tpt-telos-ir`/`tpt-telos-codegen` lowering of it is a work-in-progress tracked as
+  Phase 7 in `TODO.md`, not a finished feature.
 - **tpt-telos-ir** (`extract.rs`) — lowers the AST into `VerificationProblem`s, translating `requires`/
   `ensures`/invariants into a linear-arithmetic constraint model (QF_LRA-ish).
 - **tpt-telos-verifier** (`solver.rs`, `verify.rs`) — a self-contained Fourier-Motzkin-based SMT-style
@@ -90,6 +93,21 @@ optional `cargo build` / `go build` / `gofmt` invocation by the CLI.
   generated guard function that still enforces `requires`/`ensures` at runtime via `assert!`/`panic`.
 - No implicit type coercion, no hidden allocation — every operation is explicitly named (by design,
   to keep the language easy for both humans and the LLM agent to reason about).
+
+### Known gaps (do not assume these work without checking; tracked in `TODO.md` Phase 7)
+
+- `telos verify` does not yet print a counterexample on `FAIL` — only the restated clause text
+  (the verifier already computes one internally via `telos_verifier::solver::counterexample`, used by
+  the agent's rewrite loop, but `CheckResult`/CLI/LSP output don't surface it yet).
+- `struct`/`enum` definitions parse but are not yet consumed by `telos-ir::extract` or driven into
+  codegen's emitted field types (codegen still infers fields from usage and hardcodes `i64`).
+- Contract expressions using `Call`/`MethodCall`/`Index`/`If`/`Match`/`Forall`/`Aggregate` are rejected
+  by `telos-ir::extract`'s `linearize`/`linearize_bounded` with one generic error today; full/partial
+  lowering for these is planned, not implemented.
+- The `--solver z3` CLI flag (behind the `z3` feature) sets a global `SolverBackend` that
+  `telos-verifier::verify`/`unsat` never actually reads — it is currently a no-op, not a working
+  alternate backend, despite `TODO.md`'s Phase 6 marking it `[x]` complete. Don't trust a Phase
+  `[x]` mark alone; spot-check against the code.
 
 ### LLM agent environment variables (only relevant behind the `llm` feature)
 

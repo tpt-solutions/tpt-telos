@@ -6,7 +6,7 @@
 //! feature flag in the future.
 //!
 //! Usage:
-//! ```no_run
+//! ```
 //! use tpt_telos_verifier::cluster::SolverPool;
 //! use tpt_telos_ir::VerificationProblem;
 //!
@@ -151,7 +151,7 @@ mod tests {
             )],
             conclusions: vec![],
         };
-        let results = pool.verify_all(&vec![problem]);
+        let results = pool.verify_all(&[problem]);
         assert_eq!(results.len(), 1);
         assert!(results[0].all_passed);
     }

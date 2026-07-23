@@ -474,6 +474,7 @@ fn pretty(e: &Expr) -> String {
             };
             format!("{}({})", op, args.join(", "))
         }
+        Expr::Range { lo, hi } => format!("{}..{}", pretty(lo), pretty(hi)),
     }
 }
 

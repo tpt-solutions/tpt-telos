@@ -247,34 +247,68 @@ fn apply_fixes(stmts: &mut [Stmt], fixes: &HashMap<(String, String), Expr>) {
 pub fn synthesize_from_ensures(spec: &FuncSpec) -> Candidate {
     let mut field_assigns: Vec<Assign> = Vec::new();
     let mut var_assigns: Vec<Assign> = Vec::new();
+    let mut other_stmts: Vec<Stmt> = Vec::new();
 
     for e in &spec.func.ensures {
-        if let Expr::Bin {
-            op: BinOp::Eq,
-            lhs,
-            rhs,
-        } = e
-        {
-            let value = resolve_old(rhs);
-            match &**lhs {
-                Expr::Field { base, field } => {
-                    field_assigns.push(Assign {
-                        target: Expr::Field {
-                            base: base.clone(),
-                            field: field.clone(),
-                        },
-                        op: AssignOp::Set,
-                        value,
-                    });
+        match e {
+            Expr::Bin {
+                op: BinOp::Eq,
+                lhs,
+                rhs,
+            } => {
+                let value = resolve_old(rhs);
+                match &**lhs {
+                    Expr::Field { base, field } => {
+                        field_assigns.push(Assign {
+                            target: Expr::Field {
+                                base: base.clone(),
+                                field: field.clone(),
+                            },
+                            op: AssignOp::Set,
+                            value,
+                        });
+                    }
+                    Expr::Var(v) => {
+                        var_assigns.push(Assign {
+                            target: Expr::Var(v.clone()),
+                            op: AssignOp::Set,
+                            value,
+                        });
+                    }
+                    _ => {}
                 }
-                Expr::Var(v) => {
-                    var_assigns.push(Assign {
-                        target: Expr::Var(v.clone()),
+            }
+            Expr::If(i) => {
+                // Synthesize if-statement body from case-split ensures.
+                let then_assigns = synthesize_assigns_from_ensures_body(&i.then_expr, spec);
+                let else_assigns = synthesize_assigns_from_ensures_body(&i.else_expr, spec);
+                other_stmts.push(Stmt::If(IfStmt {
+                    condition: *i.condition.clone(),
+                    then_body: then_assigns,
+                    else_body: if else_assigns.is_empty() {
+                        None
+                    } else {
+                        Some(else_assigns)
+                    },
+                }));
+            }
+            Expr::Call(c) => {
+                // Direct call ensures: call the function and assign result.
+                if let Some(out) = spec.func.params.first().map(|p| p.name.clone()) {
+                    let args = c.args.iter().map(resolve_old).collect();
+                    other_stmts.push(Stmt::Assign(Assign {
+                        target: Expr::Var(out),
                         op: AssignOp::Set,
-                        value,
-                    });
+                        value: Expr::Call(CallExpr {
+                            func: c.func.clone(),
+                            args,
+                        }),
+                    }));
                 }
-                _ => {}
+            }
+            _ => {
+                // Unhandled ensures shape: skip silently (the verifier will
+                // catch any unsatisfied contracts).
             }
         }
     }
@@ -286,5 +320,40 @@ pub fn synthesize_from_ensures(spec: &FuncSpec) -> Candidate {
     for a in var_assigns {
         stmts.push(Stmt::Assign(a));
     }
+    stmts.extend(other_stmts);
     Candidate { stmts }
+}
+
+/// Synthesize assignment statements from an ensures body expression.
+fn synthesize_assigns_from_ensures_body(expr: &Expr, _spec: &FuncSpec) -> Vec<Stmt> {
+    let mut stmts = Vec::new();
+    if let Expr::Bin {
+        op: BinOp::Eq,
+        lhs,
+        rhs,
+    } = expr
+    {
+        let value = resolve_old(rhs);
+        match &**lhs {
+            Expr::Field { base, field } => {
+                stmts.push(Stmt::MutateState(vec![Assign {
+                    target: Expr::Field {
+                        base: base.clone(),
+                        field: field.clone(),
+                    },
+                    op: AssignOp::Set,
+                    value,
+                }]));
+            }
+            Expr::Var(v) => {
+                stmts.push(Stmt::Assign(Assign {
+                    target: Expr::Var(v.clone()),
+                    op: AssignOp::Set,
+                    value,
+                }));
+            }
+            _ => {}
+        }
+    }
+    stmts
 }

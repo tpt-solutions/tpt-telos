@@ -9,6 +9,7 @@ SUPPORTED (verifier + all backends):
   Arithmetic operators    +  -  *  /  (unary -)
   Comparison operators    ==  !=  <  <=  >  >=
   Logical conjunction     &&  (in requires/ensures)
+  Logical disjunction     ||  (via DNF normalization)
   Post-conditions         ensures e        (provable from requires + mutations)
   Pre-conditions          requires e       (assumed true in pre-state)
   Pre-state reference     old(expr)        (e.g. old(w.balance))
@@ -23,14 +24,19 @@ SUPPORTED (verifier + all backends):
                           ml_training  python  jax                            → Python
   Nonlinear contracts     x * y < K        (verified via interval bounding when bounds present;
                                             marked [interval-bounded] in output)
+  Float types             Float32/Float64  (IEEE 754 interval arithmetic in IR)
+  Bounded quantifiers     forall i in lo..hi { body }  (unrolled to conjunctions)
+  Aggregate expressions   sum/count over bounded ranges
+  Modular verification    Call/MethodCall resolved via callee ensures
+  Array/slice contracts   Constant-index access in contracts
 
 NEW IN v0.2.0 (koinon feature set):
   Return types            func f(x: T) -> Result<T, E>  (generic return types)
   Let bindings            let x [: Type] = expr;
   Function calls          func_name(args) in expressions
   Method calls            receiver.method(args)
-  Quantified invariants   forall x: Type [in domain] { expr }  (parser + codegen only)
-  Aggregate expressions   sum(expr), min(a, b), max(a, b), count(expr)
+  Quantified invariants   forall x: Type in lo..hi { body }  (bounded range unrolling)
+  Aggregate expressions   sum/count over bounded ranges
   Mutable parameters      mut sender: Account
   Control flow            if expr { stmts } [else { stmts }]
                           if expr { expr } else { expr }  (expression form)
@@ -39,18 +45,22 @@ NEW IN v0.2.0 (koinon feature set):
   Enum definitions        enum Name { Variant { field: Type }, Variant2, ... }
   Error propagation       expr?
   Patterns                literal | var | Constructor(fields...) | _
+  Range expressions       lo..hi  (exclusive upper bound, for forall/aggregate domains)
+  Modular verification    Call/MethodCall resolved via callee ensures substitution
+  Constant-index arrays   arr[constant] in contracts
 
 PARTIAL / LIMITED:
-  Logical disjunction     ||  parsed but rejected at IR lowering (Phase 6: DNF normalization)
+  Logical disjunction     ||  supported via DNF normalization in requires/ensures
   @state(...) semantics   parsed and forwarded to router; storage-class behavior not enforced
-  Integer types only      Int / PositiveInt only; no Float32/Float64 (Phase 6)
-  Quantifier verification forall is parsed and codegen'd to runtime checks; no formal verification
+  Floating-point          Float32/Float64 types; IR uses IEEE 754 interval arithmetic
+  Quantifier verification forall with bounded ranges (lo..hi) verified via unrolling
+  Modular verification    Call/MethodCall resolved via callee ensures substitution
+  Array/slice contracts   Constant-index access (arr[0]) in contracts; symbolic indices rejected
 
 UNSUPPORTED (parse error or silent drop):
   Strings / booleans      no string or bool literal types
-  Arrays / slices         no [T; N] or [T] (Phase 6)
-  Cross-module refs       invariant types from other modules not referenceable (Phase 6)
-  Floating-point          no f32/f64 literals or operations (Phase 6)
+  Symbolic array indices  non-constant index in contracts rejected
+  Cross-module refs       invariant types from other modules not referenceable
 
 --------------------------------------------------------------------------------
 

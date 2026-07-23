@@ -29,7 +29,10 @@ pub use project::{generate_project, GeneratedFile, Project};
 
 /// Maps a type name to the set of fields that must appear on its generated
 /// struct.
-pub(crate) type TypeFields = HashMap<String, BTreeSet<String>>;
+/// Per-type field definitions: maps a type name to its ordered list of
+/// `(field_name, field_type)` pairs. Populated from explicit `StructDef`
+/// declarations when available; otherwise inferred from usage.
+pub(crate) type TypeFields = HashMap<String, Vec<(String, Type)>>;
 
 /// Classification of a single (post-analysis) function parameter, shared by the
 /// Rust backend, the Go backend, and the automatic FFI bridge so all three
@@ -88,7 +91,13 @@ pub(crate) fn analyze_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Func
             continue; // produced as the return value, not an input
         }
         let ty = p.ty.name();
-        let struct_fields = types.get(ty).cloned().unwrap_or_default();
+        let struct_fields: Vec<String> = types
+            .get(ty)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
         if struct_fields.is_empty() {
             inputs.push(InputParam::Scalar {
                 name: p.name.clone(),
@@ -177,8 +186,26 @@ pub(crate) fn collect_bodies(outcomes: &[FuncOutcome]) -> HashMap<String, Vec<St
 }
 
 pub(crate) fn collect_types(module: &Module, types: &mut TypeFields) {
-    // Field accesses keyed by the *base name* they were written with (usually a
-    // parameter name). We re-point these onto the parameter's type afterwards.
+    // First pass: collect explicit StructDef declarations — these provide
+    // the authoritative type information for each field.
+    for item in &module.items {
+        if let Item::Struct(sd) = item {
+            let entry = types.entry(sd.name.clone()).or_default();
+            for fd in &sd.fields {
+                // Don't overwrite if already present (preserve order from first def).
+                if !entry.iter().any(|(n, _)| n == &fd.name) {
+                    entry.push((fd.name.clone(), fd.ty.clone()));
+                }
+            }
+        }
+        if let Item::Enum(ed) = item {
+            // Enum variants become unit variants in codegen; record the enum
+            // name with no fields (the router/codegen handles enum-specific logic).
+            types.entry(ed.name.clone()).or_default();
+        }
+    }
+
+    // Second pass: infer fields from usage for types without explicit StructDef.
     let mut raw_fields: HashMap<String, BTreeSet<String>> = HashMap::new();
     let mut field_users: HashSet<String> = HashSet::new();
 
@@ -226,17 +253,26 @@ pub(crate) fn collect_types(module: &Module, types: &mut TypeFields) {
         if let Item::Func(f) = item {
             for p in &f.params {
                 if let Some(fields) = raw_fields.remove(&p.name) {
-                    types
-                        .entry(p.ty.name().to_string())
-                        .or_default()
-                        .extend(fields);
+                    let ty_name = p.ty.name().to_string();
+                    let entry = types.entry(ty_name).or_default();
+                    for f in fields {
+                        if !entry.iter().any(|(n, _)| n == &f) {
+                            // Infer type as Int for usage-inferred fields.
+                            entry.push((f, Type::int()));
+                        }
+                    }
                 }
             }
         }
     }
     // Any bases that were never parameters keep their raw (base-named) fields.
     for (base, fields) in raw_fields {
-        types.entry(base).or_default().extend(fields);
+        let entry = types.entry(base).or_default();
+        for f in fields {
+            if !entry.iter().any(|(n, _)| n == &f) {
+                entry.push((f, Type::int()));
+            }
+        }
     }
 }
 
@@ -265,7 +301,11 @@ fn generate_module(
         "// ===== module {} (target: {}, storage: {}) =====\n",
         module.name,
         route.target.as_str(),
-        if is_persistent { "persistent" } else { "ephemeral" }
+        if is_persistent {
+            "persistent"
+        } else {
+            "ephemeral"
+        }
     ));
 
     // Structs.
@@ -277,8 +317,8 @@ fn generate_module(
             out.push_str("#[derive(serde::Serialize, serde::Deserialize)]\n");
         }
         out.push_str(&format!("pub struct {} {{\n", ty));
-        for f in fields {
-            out.push_str(&format!("    pub {}: i64,\n", f));
+        for (f, fty) in fields {
+            out.push_str(&format!("    pub {}: {},\n", f, render_type(fty)));
         }
         out.push_str("}\n\n");
     }
@@ -349,7 +389,18 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
         }
     }
 
-    let ret = if scalar_out.is_some() { " -> i64" } else { "" };
+    let uses_try = stmts.iter().any(stmt_contains_try);
+    let ret = if uses_try {
+        if scalar_out.is_some() {
+            " -> Result<i64, String>".to_string()
+        } else {
+            " -> Result<(), String>".to_string()
+        }
+    } else if scalar_out.is_some() {
+        " -> i64".to_string()
+    } else {
+        String::new()
+    };
 
     out.push_str(&format!(
         "pub fn {}({}){} {{\n",
@@ -425,11 +476,61 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
     }
 
     if let Some(outvar) = &scalar_out {
-        out.push_str(&format!("    {}\n", outvar));
+        if uses_try {
+            out.push_str(&format!("    Ok({})\n", outvar));
+        } else {
+            out.push_str(&format!("    {}\n", outvar));
+        }
     }
 
     out.push_str("}\n");
     out
+}
+
+fn stmt_contains_try(s: &Stmt) -> bool {
+    match s {
+        Stmt::MutateState(assigns) => assigns.iter().any(|a| expr_contains_try(&a.value)),
+        Stmt::Assign(a) => expr_contains_try(&a.value),
+        Stmt::Let(lb) => expr_contains_try(&lb.value),
+        Stmt::If(is) => {
+            expr_contains_try(&is.condition)
+                || is.then_body.iter().any(stmt_contains_try)
+                || is
+                    .else_body
+                    .as_ref()
+                    .is_some_and(|b| b.iter().any(stmt_contains_try))
+        }
+        Stmt::Match(ms) => {
+            expr_contains_try(&ms.scrutinee)
+                || ms.arms.iter().any(|a| a.body.iter().any(stmt_contains_try))
+        }
+        Stmt::Return(e) => e.as_ref().is_some_and(expr_contains_try),
+    }
+}
+
+fn expr_contains_try(e: &Expr) -> bool {
+    match e {
+        Expr::Try(_) => true,
+        Expr::Unary { expr, .. } => expr_contains_try(expr),
+        Expr::Bin { lhs, rhs, .. } => expr_contains_try(lhs) || expr_contains_try(rhs),
+        Expr::Call(c) => c.args.iter().any(expr_contains_try),
+        Expr::MethodCall(m) => {
+            expr_contains_try(&m.receiver) || m.args.iter().any(expr_contains_try)
+        }
+        Expr::Index(i) => expr_contains_try(&i.receiver) || expr_contains_try(&i.index),
+        Expr::If(i) => {
+            expr_contains_try(&i.condition)
+                || expr_contains_try(&i.then_expr)
+                || expr_contains_try(&i.else_expr)
+        }
+        Expr::Match(m) => {
+            expr_contains_try(&m.scrutinee) || m.arms.iter().any(|a| expr_contains_try(&a.expr))
+        }
+        Expr::Old(e) => expr_contains_try(e),
+        Expr::Forall(f) => expr_contains_try(&f.body),
+        Expr::Aggregate(a) => a.args.iter().any(expr_contains_try),
+        _ => false,
+    }
 }
 
 pub(crate) fn render_params_sig(f: &Func) -> String {
@@ -535,6 +636,7 @@ pub(crate) fn render_expr(e: &Expr) -> String {
             };
             format!("{}({})", op, args.join(", "))
         }
+        Expr::Range { lo, hi } => format!("{}..{}", render_expr(lo), render_expr(hi)),
     }
 }
 
@@ -710,7 +812,7 @@ fn render_stmt_indented(s: &Stmt, out: &mut String, indent: usize) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::HashMap;
 
     use tpt_telos_parser::ast::*;
     use tpt_telos_parser::Span;
@@ -769,7 +871,7 @@ mod tests {
 
     fn counter_types() -> TypeFields {
         let mut m = HashMap::new();
-        m.insert("Counter".to_string(), BTreeSet::from(["v".to_string()]));
+        m.insert("Counter".to_string(), vec![("v".to_string(), Type::int())]);
         m
     }
 
@@ -967,7 +1069,7 @@ mod tests {
         let mut types = HashMap::new();
         collect_types(&module, &mut types);
         assert_eq!(types.get("Counter").map(|s| s.len()), Some(1));
-        assert!(types.get("Counter").unwrap().contains("v"));
+        assert!(types.get("Counter").unwrap().iter().any(|(n, _)| n == "v"));
     }
 
     // ---- go::exported ----
@@ -1010,7 +1112,7 @@ mod tests {
         let mut types = HashMap::new();
         types.insert(
             "Balance".to_string(),
-            BTreeSet::from(["amount".to_string()]),
+            vec![("amount".to_string(), Type::int())],
         );
         let out = eject::render_rust_ejected(&f, &f.body, &types);
 
@@ -1057,7 +1159,8 @@ mod tests {
 
     #[test]
     fn ephemeral_storage_no_serde_derive() {
-        let src = "module M { invariant Counter { v >= 0 } func f(c: Counter) requires c.v >= 0 { } }";
+        let src =
+            "module M { invariant Counter { v >= 0 } func f(c: Counter) requires c.v >= 0 { } }";
         let modules = tpt_telos_parser::parse(src).unwrap();
         let rust = generate_program(&modules, &[]);
         assert!(

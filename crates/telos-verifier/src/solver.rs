@@ -180,7 +180,11 @@ pub fn unsat(cs: &[Constraint]) -> bool {
 /// Negate a conclusion into one or more branches (each a conjunction of
 /// constraints) that, conjoined with the premises, must each be unsatisfiable
 /// for the conclusion to be entailed.
-fn negate(concl: &Constraint) -> Vec<Vec<Constraint>> {
+/// Negate a constraint: produce zero or more constraint branches whose
+/// disjunction is the logical negation of `concl`. For example, the negation
+/// of `x >= 5` is `x < 5` (one branch), while the negation of `x == 5` is
+/// `x < 5 || x > 5` (two branches).
+pub fn negate(concl: &Constraint) -> Vec<Vec<Constraint>> {
     let Constraint(lin, rel) = concl;
     let branch = |r: Relation| vec![Constraint(lin.clone(), r)];
     match rel {

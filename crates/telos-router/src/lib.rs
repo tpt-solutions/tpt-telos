@@ -81,19 +81,14 @@ pub enum DiagnosticKind {
 
 /// The storage class for a module's data structures, derived from
 /// `@state(persistent)` or `@state(ephemeral)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageClass {
     /// Database-backed / serializable structs. `persistent` modules emit
     /// `#[derive(Serialize, Deserialize)]` (Rust) and JSON tags (Go).
     Persistent,
     /// Stack-only / transient structs (default). No serialization support.
+    #[default]
     Ephemeral,
-}
-
-impl Default for StorageClass {
-    fn default() -> Self {
-        StorageClass::Ephemeral
-    }
 }
 
 /// The routing decision for a module or function.
