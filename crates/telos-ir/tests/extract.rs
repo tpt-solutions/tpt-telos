@@ -59,6 +59,72 @@ fn first_problem(src: &str) -> tpt_telos_ir::VerificationProblem {
     probs.remove(0)
 }
 
+// ---- source-span propagation (Phase 6, deliverable 1) --------------------
+
+#[test]
+fn conclusion_location_matches_source_ensures_span() {
+    let src = "module M {\n\
+               func f(x: i64)\n\
+               requires x >= 0\n\
+               ensures x >= 0\n\
+               { }\n\
+               }";
+    let modules = parse(src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let ensures_conclusion = problems[0]
+        .conclusions
+        .iter()
+        .find(|c| c.is_ensures)
+        .expect("expected an ensures conclusion");
+    // The `ensures` clause is on line 4 of the fixture above.
+    assert_eq!(ensures_conclusion.location.line, 4);
+}
+
+#[test]
+fn conclusion_location_matches_invariant_constraint_span() {
+    let src = "module M {\n\
+               invariant Wallet {\n\
+               balance >= 0\n\
+               }\n\
+               func f(w: Wallet)\n\
+               { }\n\
+               }";
+    let modules = parse(src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let invariant_conclusion = problems[0]
+        .conclusions
+        .iter()
+        .find(|c| !c.is_ensures)
+        .expect("expected a maintained-invariant conclusion");
+    // The `balance >= 0` constraint is on line 3 of the fixture above --
+    // distinct from the invariant's own `span` (line 2) and the function's
+    // `func_span` (line 5), proving the location came from the invariant's
+    // constraint, not a fallback.
+    assert_eq!(invariant_conclusion.location.line, 3);
+    assert_eq!(problems[0].func_span.line, 5);
+}
+
+#[test]
+fn wallet_example_ensures_locations_match_fixture_lines() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/wallet.telos"),
+    )
+    .expect("failed to read examples/wallet.telos");
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let ensures_lines: Vec<usize> = problems[0]
+        .conclusions
+        .iter()
+        .filter(|c| c.is_ensures)
+        .map(|c| c.location.line)
+        .collect();
+    // The two `ensures` clauses sit on lines 11 and 12 of wallet.telos.
+    assert_eq!(ensures_lines, vec![11, 12]);
+}
+
 #[test]
 fn extract_requires_premise() {
     // requires x >= 0  =>  (x) - 0 >= 0

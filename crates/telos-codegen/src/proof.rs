@@ -249,6 +249,7 @@ mod tests {
             final_candidate: Candidate { stmts: vec![] },
             problem: VerificationProblem {
                 func_name: name.to_string(),
+                func_span: Default::default(),
                 premises: vec![],
                 conclusions: vec![],
             },

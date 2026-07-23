@@ -47,3 +47,37 @@ fn compound_has_expected_problem_shape() {
     );
     assert!(compound.conclusions.len() >= 2);
 }
+
+#[test]
+fn disjunction_example_passes() {
+    let src = std::fs::read_to_string("../../examples/disjunction.telos").unwrap();
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    // Disjunction in requires produces 2 premise branches → 2 problems.
+    assert_eq!(problems.len(), 2, "expected 2 problems from requires disjunction");
+
+    for p in &problems {
+        eprintln!("=== {} ===", p.func_name);
+        eprintln!("Premises ({}):", p.premises.len());
+        for c in &p.premises {
+            eprintln!("  {:?}", c);
+        }
+        eprintln!("Conclusions ({}):", p.conclusions.len());
+        for c in &p.conclusions {
+            eprintln!("  or_group={:?} {}", c.or_group, c.description);
+            eprintln!("    {:?}", c.constraint);
+        }
+        let r = verify(p);
+        eprintln!("Result: all_passed={}", r.all_passed);
+        for check in &r.checks {
+            eprintln!("  {} passed={}", check.description, check.passed);
+        }
+        eprintln!();
+        assert!(
+            r.all_passed,
+            "{} should verify (disjunction ensures), got {:?}",
+            p.func_name,
+            r
+        );
+    }
+}

@@ -4,6 +4,8 @@
 //! every operation is named explicitly. See `grammar.ebnf` for the formal
 //! specification.
 
+use crate::span::Span;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -139,6 +141,10 @@ pub struct Invariant {
     pub name: String,
     /// One or more boolean constraint expressions that must always hold.
     pub constraints: Vec<Expr>,
+    /// Source location of the `invariant` keyword.
+    pub span: Span,
+    /// Source location of each entry in `constraints`, index-aligned.
+    pub constraint_spans: Vec<Span>,
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +207,12 @@ pub struct Func {
     /// True when the body was elided with `;` (intent-only). The agentic
     /// synthesizer is responsible for providing an implementation.
     pub elided: bool,
+    /// Source location of the `func` keyword.
+    pub span: Span,
+    /// Source location of each entry in `requires`, index-aligned.
+    pub requires_spans: Vec<Span>,
+    /// Source location of each entry in `ensures`, index-aligned.
+    pub ensures_spans: Vec<Span>,
 }
 
 impl Func {

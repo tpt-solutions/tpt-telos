@@ -296,6 +296,40 @@ fn to_constraints_bounded(
     }
 }
 
+/// Like [`to_constraints_bounded`] but produces Disjunctive Normal Form: a list
+/// of branches, each a conjunction of constraints. `||` creates two branches;
+/// `&&` flattens within each branch.
+fn to_constraints_bounded_dnf(
+    expr: &Expr,
+    field_fn: &Naming,
+    var_fn: &dyn Fn(&str) -> String,
+    bounds: &VarBounds,
+    approximated: &mut bool,
+) -> Result<Vec<Vec<Constraint>>, String> {
+    match expr {
+        Expr::Bin { op, lhs, rhs } if *op == BinOp::Or => {
+            let left = to_constraints_bounded_dnf(lhs, field_fn, var_fn, bounds, approximated)?;
+            let right = to_constraints_bounded_dnf(rhs, field_fn, var_fn, bounds, approximated)?;
+            let mut out = left;
+            out.extend(right);
+            Ok(out)
+        }
+        Expr::Bin { op, lhs, rhs } if *op == BinOp::And => {
+            let left = to_constraints_bounded_dnf(lhs, field_fn, var_fn, bounds, approximated)?;
+            let right = to_constraints_bounded_dnf(rhs, field_fn, var_fn, bounds, approximated)?;
+            Ok(combine_dnf(&left, &right))
+        }
+        Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
+            let rel = relation_of(*op).unwrap();
+            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
+            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated)?;
+            let diff = l.sub(&r);
+            Ok(vec![vec![Constraint(diff, rel)]])
+        }
+        _ => Err("expected a boolean constraint (comparison, `&&`, or `||`)".into()),
+    }
+}
+
 fn as_int(expr: &Expr) -> Option<i64> {
     match expr {
         Expr::Int(n) => Some(*n),
@@ -698,21 +732,50 @@ fn build_problems(
 
         // conclusions: ensures + exit invariants
         let mut conclusions: Vec<Conclusion> = Vec::new();
-        for e in &func.ensures {
+        let mut next_or_group: usize = 0;
+        for (i, e) in func.ensures.iter().enumerate() {
             let mut approximated = false;
-            let cs = to_constraints_bounded(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
-            for c in cs {
-                conclusions.push(Conclusion {
-                    description: format!("ensures: {}", pretty(e)),
-                    constraint: c,
-                    is_ensures: true,
-                    is_approximation: approximated,
-                });
+            let dnf = to_constraints_bounded_dnf(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
+            let location = func.ensures_spans.get(i).copied().unwrap_or(func.span);
+            if dnf.len() == 1 {
+                // Single branch (conjunction) — one conclusion.
+                for c in &dnf[0] {
+                    conclusions.push(Conclusion {
+                        description: format!("ensures: {}", pretty(e)),
+                        constraint: c.clone(),
+                        is_ensures: true,
+                        is_approximation: approximated,
+                        location,
+                        or_group: None,
+                    });
+                }
+            } else {
+                // Disjunction: each branch is an alternative. At least one
+                // branch must be entailed. We track them with a shared
+                // `or_group` id so the verifier knows they form a disjunction.
+                let group_id = next_or_group;
+                next_or_group += 1;
+                for (branch_idx, branch) in dnf.iter().enumerate() {
+                    for c in branch {
+                        conclusions.push(Conclusion {
+                            description: format!(
+                                "ensures: {} [branch {}]",
+                                pretty(e),
+                                branch_idx
+                            ),
+                            constraint: c.clone(),
+                            is_ensures: true,
+                            is_approximation: approximated,
+                            location,
+                            or_group: Some(group_id),
+                        });
+                    }
+                }
             }
         }
         for p in &func.params {
             if let Some(inv) = invariants.get(p.ty.name()) {
-                for c in &inv.constraints {
+                for (j, c) in inv.constraints.iter().enumerate() {
                     let inst = instantiate(c, &p.name);
                     let mut approximated = false;
                     let cs = to_constraints_bounded(
@@ -722,6 +785,7 @@ fn build_problems(
                         &premise_bounds,
                         &mut approximated,
                     )?;
+                    let location = inv.constraint_spans.get(j).copied().unwrap_or(inv.span);
                     for c2 in cs {
                         conclusions.push(Conclusion {
                             description: format!(
@@ -732,6 +796,8 @@ fn build_problems(
                             constraint: c2,
                             is_ensures: false,
                             is_approximation: approximated,
+                            location,
+                            or_group: None,
                         });
                     }
                 }
@@ -746,6 +812,7 @@ fn build_problems(
 
         problems.push(VerificationProblem {
             func_name,
+            func_span: func.span,
             premises: premises.clone(),
             conclusions,
         });

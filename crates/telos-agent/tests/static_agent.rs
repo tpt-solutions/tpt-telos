@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use tpt_telos_agent::static_agent::synthesize_from_ensures;
 use tpt_telos_agent::{transpile_func, Candidate, CodeAgent, FuncSpec, StaticAgent};
 use tpt_telos_parser::ast::*;
+use tpt_telos_parser::Span;
 
 // ---- AST builders ---------------------------------------------------------
 
@@ -56,6 +57,9 @@ fn func_with(
         ensures,
         body,
         elided,
+        span: Span::default(),
+        requires_spans: vec![],
+        ensures_spans: vec![],
     }
 }
 

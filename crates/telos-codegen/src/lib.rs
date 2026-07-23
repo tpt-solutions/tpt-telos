@@ -713,6 +713,7 @@ mod tests {
     use std::collections::{BTreeSet, HashMap};
 
     use tpt_telos_parser::ast::*;
+    use tpt_telos_parser::Span;
 
     use crate::{
         analyze_func, collect_types, eject, generate_program, go, render_func, InputParam,
@@ -760,6 +761,9 @@ mod tests {
             ensures,
             body,
             elided: false,
+            span: Span::default(),
+            requires_spans: vec![],
+            ensures_spans: vec![],
         }
     }
 

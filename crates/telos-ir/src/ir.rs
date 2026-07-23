@@ -4,6 +4,8 @@
 //! `coefficient * variable` plus a constant, compared against zero.
 //! This is the fragment handled by the QF_LRA solver in `telos-verifier`.
 
+pub use tpt_telos_parser::Span;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Relation {
     Le, // <= 0
@@ -167,6 +169,9 @@ impl Linear {
 #[derive(Debug, Clone)]
 pub struct VerificationProblem {
     pub func_name: String,
+    /// Source location of the function's `func` declaration; the fallback
+    /// location for conclusions that cannot be tied to a more specific span.
+    pub func_span: Span,
     /// Facts assumed/known: pre-conditions, type constraints, entry invariants,
     /// and `mutate state` assignments (which define post-state variables).
     pub premises: Vec<Constraint>,
@@ -185,4 +190,12 @@ pub struct Conclusion {
     /// The proof is sound but conservative: the constraint was replaced with a
     /// worst-case constant derived from the variable bounds in the premises.
     pub is_approximation: bool,
+    /// Source location of the clause this conclusion was derived from (the
+    /// `ensures` clause, or the owning invariant's constraint).
+    pub location: Span,
+    /// Disjunction group: when `Some(n)`, this conclusion belongs to group `n`
+    /// along with other conclusions sharing the same group id. At least one
+    /// conclusion in the group must be entailed for the group to pass. When
+    /// `None`, the conclusion must be entailed independently.
+    pub or_group: Option<usize>,
 }

@@ -8,12 +8,14 @@
 //! Usage:
 //! ```no_run
 //! use tpt_telos_verifier::cluster::SolverPool;
+//! use tpt_telos_ir::VerificationProblem;
 //!
 //! let pool = SolverPool::new(4); // 4 worker threads
+//! let problems: Vec<VerificationProblem> = vec![];
 //! let results = pool.verify_all(&problems);
 //! ```
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 use tpt_telos_ir::VerificationProblem;
@@ -58,6 +60,7 @@ impl SolverPool {
 
     /// Create a new worker pool with a custom worker implementation.
     pub fn with_worker<W: SolverWorker + 'static>(worker: W, num_workers: usize) -> Self {
+        let shared_worker: Arc<dyn SolverWorker> = Arc::new(worker);
         let (result_tx, result_rx) = mpsc::channel();
         let mut workers = Vec::new();
         let mut handles = Vec::new();
@@ -66,7 +69,7 @@ impl SolverPool {
             let (task_tx, task_rx) = mpsc::channel::<(usize, VerificationProblem)>();
             let result_tx = result_tx.clone();
             let w = WorkerWrapper {
-                worker: Box::new(worker.clone()),
+                worker: shared_worker.clone(),
             };
             let handle = thread::spawn(move || {
                 while let Ok((idx, problem)) = task_rx.recv() {
@@ -120,12 +123,8 @@ impl SolverPool {
 }
 
 struct WorkerWrapper {
-    worker: Box<dyn SolverWorker>,
+    worker: Arc<dyn SolverWorker>,
 }
-
-// WorkerWrapper is Send + Sync because SolverWorker requires it.
-unsafe impl Send for WorkerWrapper {}
-unsafe impl Sync for WorkerWrapper {}
 
 // FourierMotzkinWorker needs to be cloneable for the pool.
 impl Clone for FourierMotzkinWorker {
@@ -138,12 +137,14 @@ impl Clone for FourierMotzkinWorker {
 mod tests {
     use super::*;
     use tpt_telos_ir::{Constraint, Linear, Relation};
+    use tpt_telos_parser::Span;
 
     #[test]
     fn pool_verifies_single_problem() {
         let pool = SolverPool::new(2);
         let problem = VerificationProblem {
             func_name: "test".to_string(),
+            func_span: Default::default(),
             premises: vec![Constraint(
                 Linear::var("x").sub(&Linear::constant_only(0)),
                 Relation::Ge,
@@ -161,6 +162,7 @@ mod tests {
         let problems: Vec<VerificationProblem> = (0..10)
             .map(|i| VerificationProblem {
                 func_name: format!("f{}", i),
+                func_span: Default::default(),
                 premises: vec![Constraint(
                     Linear::var("x").sub(&Linear::constant_only(0)),
                     Relation::Ge,
@@ -181,6 +183,7 @@ mod tests {
         let problems: Vec<VerificationProblem> = (0..6)
             .map(|i| VerificationProblem {
                 func_name: format!("f{}", i),
+                func_span: Default::default(),
                 premises: vec![],
                 conclusions: vec![],
             })

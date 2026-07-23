@@ -2,15 +2,21 @@
 
 use crate::ast::*;
 use crate::lexer::{lex, Token};
+use crate::span::{LineIndex, Span};
 
 pub struct Parser {
     tokens: Vec<(Token, usize, usize)>,
     pos: usize,
+    line_index: LineIndex,
 }
 
 impl Parser {
-    fn new(tokens: Vec<(Token, usize, usize)>) -> Self {
-        Parser { tokens, pos: 0 }
+    fn new(src: &str, tokens: Vec<(Token, usize, usize)>) -> Self {
+        Parser {
+            tokens,
+            pos: 0,
+            line_index: LineIndex::new(src),
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -21,6 +27,12 @@ impl Parser {
         let (tok, _, _) = self.tokens[self.pos].clone();
         self.pos += 1;
         tok
+    }
+
+    /// Source span of the token about to be consumed (i.e. `self.peek()`).
+    fn current_span(&self) -> Span {
+        let start_offset = self.tokens[self.pos].1;
+        self.line_index.span_at(start_offset)
     }
 
     fn expect(&mut self, expected: Token) -> Result<(), String> {
@@ -99,7 +111,7 @@ impl Parser {
     /// Parse a full source string into a list of modules.
     pub fn parse_source(src: &str) -> Result<Vec<Module>, String> {
         let tokens = lex(src)?;
-        let mut p = Parser::new(tokens);
+        let mut p = Parser::new(src, tokens);
         let mut modules = Vec::new();
         while *p.peek() != Token::Eof {
             modules.push(p.parse_module()?);
@@ -205,18 +217,26 @@ impl Parser {
     }
 
     fn parse_invariant(&mut self) -> Result<Invariant, String> {
+        let span = self.current_span();
         self.expect(Token::KwInvariant)?;
         let name = self.expect_ident()?;
         self.expect(Token::LBrace)?;
         let mut constraints = Vec::new();
+        let mut constraint_spans = Vec::new();
         while *self.peek() != Token::RBrace {
+            constraint_spans.push(self.current_span());
             constraints.push(self.parse_expr()?);
             if *self.peek() == Token::Semicolon {
                 self.advance();
             }
         }
         self.expect(Token::RBrace)?;
-        Ok(Invariant { name, constraints })
+        Ok(Invariant {
+            name,
+            constraints,
+            span,
+            constraint_spans,
+        })
     }
 
     fn parse_struct_def(&mut self) -> Result<StructDef, String> {
@@ -282,6 +302,7 @@ impl Parser {
     // ---- functions ----
 
     fn parse_func(&mut self, attributes: Vec<Attribute>) -> Result<Func, String> {
+        let span = self.current_span();
         self.expect(Token::KwFunc)?;
         let name = self.expect_ident()?;
         self.expect(Token::LParen)?;
@@ -321,12 +342,16 @@ impl Parser {
 
         let mut requires = Vec::new();
         let mut ensures = Vec::new();
+        let mut requires_spans = Vec::new();
+        let mut ensures_spans = Vec::new();
         while *self.peek() == Token::KwRequires || *self.peek() == Token::KwEnsures {
             if *self.peek() == Token::KwRequires {
                 self.advance();
+                requires_spans.push(self.current_span());
                 requires.push(self.parse_expr()?);
             } else {
                 self.advance();
+                ensures_spans.push(self.current_span());
                 ensures.push(self.parse_expr()?);
             }
         }
@@ -354,6 +379,9 @@ impl Parser {
             ensures,
             body,
             elided,
+            span,
+            requires_spans,
+            ensures_spans,
         })
     }
 

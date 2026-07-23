@@ -51,9 +51,16 @@ pub struct VerificationResult {
 /// assert!(result.checks.iter().all(|c| c.passed));
 /// ```
 pub fn verify(problem: &VerificationProblem) -> VerificationResult {
+    use std::collections::HashMap;
+
     let mut checks = Vec::new();
     let mut all_passed = true;
+
+    // First pass: check independent conclusions (or_group: None).
     for concl in &problem.conclusions {
+        if concl.or_group.is_some() {
+            continue; // handled in second pass
+        }
         let passed = entails(&problem.premises, &concl.constraint);
         if !passed {
             all_passed = false;
@@ -65,6 +72,36 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
             is_approximation: concl.is_approximation,
         });
     }
+
+    // Second pass: handle disjunction groups. For each group, at least one
+    // conclusion must be entailed.
+    let mut groups: HashMap<usize, Vec<&tpt_telos_ir::Conclusion>> = HashMap::new();
+    for concl in &problem.conclusions {
+        if let Some(g) = concl.or_group {
+            groups.entry(g).or_default().push(concl);
+    }
+    }
+    for (_group_id, group_conclusions) in &groups {
+        let mut any_passed = false;
+        let mut group_results: Vec<CheckResult> = Vec::new();
+        for concl in group_conclusions {
+            let passed = entails(&problem.premises, &concl.constraint);
+            if passed {
+                any_passed = true;
+            }
+            group_results.push(CheckResult {
+                description: concl.description.clone(),
+                passed,
+                is_ensures: concl.is_ensures,
+                is_approximation: concl.is_approximation,
+            });
+        }
+        if !any_passed {
+            all_passed = false;
+        }
+        checks.extend(group_results);
+    }
+
     VerificationResult {
         func_name: problem.func_name.clone(),
         checks,
