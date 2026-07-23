@@ -653,6 +653,198 @@ fn combine_dnf(a: &[Vec<Constraint>], b: &[Vec<Constraint>]) -> Vec<Vec<Constrai
     out
 }
 
+/// Negate a single relation (`x R y` -> `x (not R) y`), splitting `Eq`/`Ne`
+/// into their two-branch disjunctive negation like `solver::negate` does.
+fn negate_relation_branches(diff: &Linear, rel: Relation) -> Vec<Constraint> {
+    match rel {
+        Relation::Eq => vec![
+            Constraint(diff.clone(), Relation::Lt),
+            Constraint(diff.clone(), Relation::Gt),
+        ],
+        Relation::Ne => vec![Constraint(diff.clone(), Relation::Eq)],
+        Relation::Le => vec![Constraint(diff.clone(), Relation::Gt)],
+        Relation::Lt => vec![Constraint(diff.clone(), Relation::Ge)],
+        Relation::Ge => vec![Constraint(diff.clone(), Relation::Lt)],
+        Relation::Gt => vec![Constraint(diff.clone(), Relation::Le)],
+    }
+}
+
+/// One branch of a function body's mutation analysis: the extra premises
+/// that characterize when this branch is taken (from `if`/`else` guards),
+/// the mutation constraints it applies, and the set of fields it assigns.
+struct BodyBranch {
+    extra_premises: Vec<Constraint>,
+    mutations: Vec<Constraint>,
+    assigned: HashSet<(String, String)>,
+}
+
+/// Recursively collect every field referenced by a function body's
+/// statements (assignment targets and values), descending into `if`/`match`
+/// arms so frame axioms account for fields touched only in nested branches.
+fn collect_body_referenced_fields(body: &[Stmt], out: &mut HashSet<(String, String)>) {
+    for stmt in body {
+        match stmt {
+            Stmt::MutateState(assigns) => {
+                for a in assigns {
+                    collect_fields(&a.value, out);
+                    if let Expr::Field { base, field } = &a.target {
+                        out.insert((base.clone(), field.clone()));
+                    }
+                }
+            }
+            Stmt::Assign(a) => {
+                collect_fields(&a.value, out);
+                if let Expr::Field { base, field } = &a.target {
+                    out.insert((base.clone(), field.clone()));
+                }
+            }
+            Stmt::If(if_stmt) => {
+                collect_body_referenced_fields(&if_stmt.then_body, out);
+                if let Some(else_body) = &if_stmt.else_body {
+                    collect_body_referenced_fields(else_body, out);
+                }
+            }
+            Stmt::Match(match_stmt) => {
+                for arm in &match_stmt.arms {
+                    collect_body_referenced_fields(&arm.body, out);
+                }
+            }
+            Stmt::Let(_) | Stmt::Return(_) => {}
+        }
+    }
+}
+
+/// Analyze a function body's statements into mutation branches. A bare
+/// `mutate state`/assignment extends every open branch; a top-level `if`
+/// with a single-comparison condition splits into a "then" branch (guarded
+/// by the condition) and an "else" branch (guarded by its negation), each
+/// recursively analyzed. `match` arms that would mutate state are rejected
+/// with a specific error rather than silently dropped, since that shape
+/// isn't supported yet.
+fn process_body_stmts(
+    stmts: &[Stmt],
+    branches: Vec<BodyBranch>,
+    field_fn: &Naming,
+    var_fn: &dyn Fn(&str) -> String,
+) -> Result<Vec<BodyBranch>, String> {
+    let mut branches = branches;
+    for stmt in stmts {
+        match stmt {
+            Stmt::MutateState(assigns) => {
+                for a in assigns {
+                    let c = assign_constraint(a, field_fn, var_fn)?;
+                    let field = match &a.target {
+                        Expr::Field { base, field } => Some((base.clone(), field.clone())),
+                        _ => None,
+                    };
+                    for b in &mut branches {
+                        b.mutations.push(c.clone());
+                        if let Some(f) = &field {
+                            b.assigned.insert(f.clone());
+                        }
+                    }
+                }
+            }
+            Stmt::Assign(a) => {
+                let c = assign_constraint(a, field_fn, var_fn)?;
+                let field = match &a.target {
+                    Expr::Field { base, field } => Some((base.clone(), field.clone())),
+                    _ => None,
+                };
+                for b in &mut branches {
+                    b.mutations.push(c.clone());
+                    if let Some(f) = &field {
+                        b.assigned.insert(f.clone());
+                    }
+                }
+            }
+            Stmt::If(if_stmt) => {
+                let (diff, rel) = match &if_stmt.condition {
+                    Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
+                        let rel = relation_of(*op).unwrap();
+                        let l = linearize(lhs, field_fn, var_fn)?;
+                        let r = linearize(rhs, field_fn, var_fn)?;
+                        (l.sub(&r), rel)
+                    }
+                    other => {
+                        return Err(format!(
+                            "`if` inside a function body must have a single comparison \
+                             condition (found `{}`); compound (`&&`/`||`) conditions are not \
+                             yet supported here",
+                            pretty(other)
+                        ));
+                    }
+                };
+                let cond_c = Constraint(diff.clone(), rel.clone());
+                let not_cond_cs = negate_relation_branches(&diff, rel);
+
+                let mut then_branches: Vec<BodyBranch> = branches
+                    .iter()
+                    .map(|b| BodyBranch {
+                        extra_premises: {
+                            let mut p = b.extra_premises.clone();
+                            p.push(cond_c.clone());
+                            p
+                        },
+                        mutations: b.mutations.clone(),
+                        assigned: b.assigned.clone(),
+                    })
+                    .collect();
+                then_branches =
+                    process_body_stmts(&if_stmt.then_body, then_branches, field_fn, var_fn)?;
+
+                // The negation may itself be a disjunction (e.g. `!=` negates
+                // to `==`, but `==` negates to `< || >`) — fan out one else
+                // branch per negation disjunct.
+                let mut else_branches: Vec<BodyBranch> = Vec::new();
+                for not_cond_c in &not_cond_cs {
+                    let guarded: Vec<BodyBranch> = branches
+                        .iter()
+                        .map(|b| BodyBranch {
+                            extra_premises: {
+                                let mut p = b.extra_premises.clone();
+                                p.push(not_cond_c.clone());
+                                p
+                            },
+                            mutations: b.mutations.clone(),
+                            assigned: b.assigned.clone(),
+                        })
+                        .collect();
+                    let processed = process_body_stmts(
+                        if_stmt.else_body.as_deref().unwrap_or(&[]),
+                        guarded,
+                        field_fn,
+                        var_fn,
+                    )?;
+                    else_branches.extend(processed);
+                }
+
+                then_branches.extend(else_branches);
+                branches = then_branches;
+            }
+            Stmt::Match(match_stmt) => {
+                let mutates = match_stmt.arms.iter().any(|arm| {
+                    arm.body.iter().any(|s| {
+                        matches!(
+                            s,
+                            Stmt::MutateState(_) | Stmt::Assign(_) | Stmt::If(_) | Stmt::Match(_)
+                        )
+                    })
+                });
+                if mutates {
+                    return Err(format!(
+                        "`match {}` has a state-mutating arm; `match` in a function body is \
+                         not yet supported when any arm mutates state",
+                        pretty(&match_stmt.scrutinee)
+                    ));
+                }
+            }
+            Stmt::Let(_) | Stmt::Return(_) => {}
+        }
+    }
+    Ok(branches)
+}
+
 fn assign_constraint(
     a: &Assign,
     field_fn: &Naming,
@@ -1065,27 +1257,12 @@ fn build_problems(
         branch.extend(inv_constraints.iter().cloned());
     }
 
-    // mutate state assignments -> equality premises defining post vars
-    let mut assigned: HashSet<(String, String)> = HashSet::new();
-    let mut mutation_constraints: Vec<Constraint> = Vec::new();
-    for stmt in &func.body {
-        let assigns = match stmt {
-            Stmt::MutateState(a) => a,
-            Stmt::Assign(a) => {
-                mutation_constraints.push(assign_constraint(a, &pre_fn, &var_fn)?);
-                std::slice::from_ref(a)
-            }
-            _ => continue,
-        };
-        for a in assigns {
-            mutation_constraints.push(assign_constraint(a, &pre_fn, &var_fn)?);
-            if let Expr::Field { base, field } = &a.target {
-                assigned.insert((base.clone(), field.clone()));
-            }
-        }
-    }
-
-    // frame axioms: any referenced field not explicitly assigned keeps its value
+    // mutate state assignments -> equality premises defining post vars.
+    // A top-level `if`/`else` in a function body splits into two branches
+    // (guarded by the condition and its negation), each carrying its own
+    // mutation constraints and set of assigned fields, so a conditional
+    // mutation like `if flag == 1 { c.v += 1 } else { c.v = 0 }` produces two
+    // separate verification branches instead of being silently ignored.
     let mut referenced: HashSet<(String, String)> = HashSet::new();
     for r in &func.requires {
         collect_fields(r, &mut referenced);
@@ -1093,20 +1270,7 @@ fn build_problems(
     for e in &func.ensures {
         collect_fields(e, &mut referenced);
     }
-    for stmt in &func.body {
-        let assigns = match stmt {
-            Stmt::MutateState(a) => a,
-            Stmt::Assign(a) => std::slice::from_ref(a),
-            _ => continue,
-        };
-        for a in assigns {
-            collect_fields(&a.value, &mut referenced);
-            if let Expr::Field { base, field } = &a.target {
-                referenced.insert((base.clone(), field.clone()));
-            }
-        }
-    }
-
+    collect_body_referenced_fields(&func.body, &mut referenced);
     for p in &func.params {
         if let Some(fields) = invariant_fields.get(p.ty.name()) {
             for f in fields {
@@ -1115,20 +1279,39 @@ fn build_problems(
         }
     }
 
-    let mut frame_constraints: Vec<Constraint> = Vec::new();
-    for (base, field) in &referenced {
-        if !assigned.contains(&(base.clone(), field.clone())) {
-            let post = Linear::var(&post_field(base, field));
-            let pre = Linear::var(&pre_field(base, field));
-            frame_constraints.push(Constraint(post.sub(&pre), Relation::Eq));
+    let body_branches = process_body_stmts(
+        &func.body,
+        vec![BodyBranch {
+            extra_premises: Vec::new(),
+            mutations: Vec::new(),
+            assigned: HashSet::new(),
+        }],
+        &pre_fn,
+        &var_fn,
+    )?;
+
+    // Cartesian product: every premise branch paired with every body branch.
+    // Each combined branch gets that body branch's extra (if-condition)
+    // premises, its mutation constraints, and frame axioms computed from its
+    // own assigned-field set (fields referenced but not assigned in *this*
+    // branch keep their pre-state value).
+    let mut combined_dnf: Vec<Vec<Constraint>> = Vec::new();
+    for premise_branch in &premise_dnf {
+        for body_branch in &body_branches {
+            let mut branch = premise_branch.clone();
+            branch.extend(body_branch.extra_premises.iter().cloned());
+            branch.extend(body_branch.mutations.iter().cloned());
+            for (base, field) in &referenced {
+                if !body_branch.assigned.contains(&(base.clone(), field.clone())) {
+                    let post = Linear::var(&post_field(base, field));
+                    let pre = Linear::var(&pre_field(base, field));
+                    branch.push(Constraint(post.sub(&pre), Relation::Eq));
+                }
+            }
+            combined_dnf.push(branch);
         }
     }
-
-    // Append mutation and frame constraints to every branch.
-    for branch in &mut premise_dnf {
-        branch.extend(mutation_constraints.iter().cloned());
-        branch.extend(frame_constraints.iter().cloned());
-    }
+    let premise_dnf = combined_dnf;
 
     // Build one VerificationProblem per DNF branch.
     let mut problems = Vec::new();
