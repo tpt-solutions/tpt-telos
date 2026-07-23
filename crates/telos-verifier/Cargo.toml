@@ -13,8 +13,13 @@ keywords.workspace = true
 categories.workspace = true
 description = "Self-contained SMT-style verifier (QF_LRA) for tpt-telos constraints"
 
+[features]
+default = []
+z3 = ["dep:z3"]
+
 [dependencies]
 tpt-telos-ir = { path = "../telos-ir", version = "0.1.0" }
+z3 = { version = "0.12", optional = true }
 
 [dev-dependencies]
 tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }

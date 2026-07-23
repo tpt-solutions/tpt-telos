@@ -106,11 +106,11 @@
 
 ## Phase 5: Verifier Hardening & Platform Extensions
 
-- [ ] **Nonlinear interval bounding** — over-approximate `x * y` contracts via interval arithmetic when both variables have bounds in `requires` clauses; mark results `[interval-bounded]` in verify output. (`crates/telos-ir/src/extract.rs`, `crates/telos-verifier/src/verify.rs`)
-- [ ] **Python/JAX codegen target** — `@boundary(ml_training|python|jax)` routes to a Python backend that emits `@dataclass` structs with `satisfies_invariants()` and runtime `assert` guards for all contracts; JAX flag emits `jnp.int64` type annotations. (`crates/telos-codegen/src/python.rs`, `crates/telos-router/src/lib.rs`)
-- [ ] **Real-time routing guard** — detect `@boundary(real_time)` or `@boundary(zero_allocation)` modules routed to Go (GC-based, non-deterministic) and emit `WARNING [real_time_go_conflict]`; `--strict-rt` flag exits non-zero. (`crates/telos-router/src/lib.rs`, `crates/telos-cli/src/main.rs`)
-- [ ] **Cryptographic proof manifest** — generate `telos-proof.json` (SHA-256 of source, per-function verification outcomes, tamper-evident `manifest_hash`) on every `build`/`project` run, and embed it as `#[used] static TELOS_PROOF_MANIFEST` in generated Rust binary (spec §7). (`crates/telos-codegen/src/proof.rs`)
-- [ ] **Language feature matrix** — document supported/partial/unsupported constructs in `grammar.ebnf` and `README.md`; eliminates ambiguity for integrators writing FADEC-level control logic.
+- [x] **Nonlinear interval bounding** — over-approximate `x * y` contracts via interval arithmetic when both variables have bounds in `requires` clauses; mark results `[interval-bounded]` in verify output. (`crates/telos-ir/src/extract.rs`, `crates/telos-verifier/src/verify.rs`)
+- [x] **Python/JAX codegen target** — `@boundary(ml_training|python|jax)` routes to a Python backend that emits `@dataclass` structs with `satisfies_invariants()` and runtime `assert` guards for all contracts; JAX flag emits `jnp.int64` type annotations. (`crates/telos-codegen/src/python.rs`, `crates/telos-router/src/lib.rs`)
+- [x] **Real-time routing guard** — detect `@boundary(real_time)` or `@boundary(zero_allocation)` modules routed to Go (GC-based, non-deterministic) and emit `WARNING [real_time_go_conflict]`; `--strict-rt` flag exits non-zero. (`crates/telos-router/src/lib.rs`, `crates/telos-cli/src/main.rs`)
+- [x] **Cryptographic proof manifest** — generate `telos-proof.json` (SHA-256 of source, per-function verification outcomes, tamper-evident `manifest_hash`) on every `build`/`project` run, and embed it as `#[used] static TELOS_PROOF_MANIFEST` in generated Rust binary (spec §7). (`crates/telos-codegen/src/proof.rs`)
+- [x] **Language feature matrix** — document supported/partial/unsupported constructs in `grammar.ebnf` and `README.md`; eliminates ambiguity for integrators writing FADEC-level control logic.
 
 ## Phase 6: Scale, Precision & Language Completeness (not yet started)
 

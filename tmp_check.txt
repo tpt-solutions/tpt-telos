@@ -1,0 +1,197 @@
+    Checking tpt-telos-ir v0.1.0 (C:\Programming\2 WIP\tpt-telos\crates\telos-ir)
+    Checking digest v0.10.7
+error[E0004]: non-exhaustive patterns: `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+   --> crates\telos-ir\src\extract.rs:36:11
+    |
+ 36 |     match expr {
+    |           ^^^^ patterns `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+    |
+note: `tpt_telos_parser::Expr` defined here
+   --> crates\telos-parser\src\ast.rs:334:1
+    |
+334 | pub enum Expr {
+    | ^^^^^^^^^^^^^
+...
+355 |     Call(CallExpr),
+    |     ---- not covered
+356 |     /// A method call: `receiver.method(args)`.
+357 |     MethodCall(MethodCallExpr),
+    |     ---------- not covered
+358 |     /// An index expression: `receiver[index]`.
+359 |     Index(IndexExpr),
+    |     ----- not covered
+360 |     /// An if expression: `if cond { a } else { b }`.
+361 |     If(IfExpr),
+    |     -- not covered
+362 |     /// A match expression: `match scrutinee { pattern => expr, ... }`.
+363 |     Match(MatchExpr),
+    |     ----- not covered
+    = note: the matched value is of type `&tpt_telos_parser::Expr`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern as shown, or multiple match arms
+    |
+ 51 ~         },
+ 52 ~         _ => todo!(),
+    |
+
+error[E0004]: non-exhaustive patterns: `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+   --> crates\telos-ir\src\extract.rs:60:11
+    |
+ 60 |     match expr {
+    |           ^^^^ patterns `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+    |
+note: `tpt_telos_parser::Expr` defined here
+   --> crates\telos-parser\src\ast.rs:334:1
+    |
+334 | pub enum Expr {
+    | ^^^^^^^^^^^^^
+...
+355 |     Call(CallExpr),
+    |     ---- not covered
+356 |     /// A method call: `receiver.method(args)`.
+357 |     MethodCall(MethodCallExpr),
+    |     ---------- not covered
+358 |     /// An index expression: `receiver[index]`.
+359 |     Index(IndexExpr),
+    |     ----- not covered
+360 |     /// An if expression: `if cond { a } else { b }`.
+361 |     If(IfExpr),
+    |     -- not covered
+362 |     /// A match expression: `match scrutinee { pattern => expr, ... }`.
+363 |     Match(MatchExpr),
+    |     ----- not covered
+    = note: the matched value is of type `&tpt_telos_parser::Expr`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern as shown, or multiple match arms
+    |
+ 96 ~         },
+ 97 +         _ => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+   --> crates\telos-ir\src\extract.rs:182:11
+    |
+182 |     match expr {
+    |           ^^^^ patterns `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+    |
+note: `tpt_telos_parser::Expr` defined here
+   --> crates\telos-parser\src\ast.rs:334:1
+    |
+334 | pub enum Expr {
+    | ^^^^^^^^^^^^^
+...
+355 |     Call(CallExpr),
+    |     ---- not covered
+356 |     /// A method call: `receiver.method(args)`.
+357 |     MethodCall(MethodCallExpr),
+    |     ---------- not covered
+358 |     /// An index expression: `receiver[index]`.
+359 |     Index(IndexExpr),
+    |     ----- not covered
+360 |     /// An if expression: `if cond { a } else { b }`.
+361 |     If(IfExpr),
+    |     -- not covered
+362 |     /// A match expression: `match scrutinee { pattern => expr, ... }`.
+363 |     Match(MatchExpr),
+    |     ----- not covered
+    = note: the matched value is of type `&tpt_telos_parser::Expr`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern as shown, or multiple match arms
+    |
+249 ~         },
+250 +         _ => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+   --> crates\telos-ir\src\extract.rs:383:11
+    |
+383 |     match expr {
+    |           ^^^^ patterns `&tpt_telos_parser::Expr::Call(_)`, `&tpt_telos_parser::Expr::MethodCall(_)`, `&tpt_telos_parser::Expr::Index(_)` and 5 more not covered
+    |
+note: `tpt_telos_parser::Expr` defined here
+   --> crates\telos-parser\src\ast.rs:334:1
+    |
+334 | pub enum Expr {
+    | ^^^^^^^^^^^^^
+...
+355 |     Call(CallExpr),
+    |     ---- not covered
+356 |     /// A method call: `receiver.method(args)`.
+357 |     MethodCall(MethodCallExpr),
+    |     ---------- not covered
+358 |     /// An index expression: `receiver[index]`.
+359 |     Index(IndexExpr),
+    |     ----- not covered
+360 |     /// An if expression: `if cond { a } else { b }`.
+361 |     If(IfExpr),
+    |     -- not covered
+362 |     /// A match expression: `match scrutinee { pattern => expr, ... }`.
+363 |     Match(MatchExpr),
+    |     ----- not covered
+    = note: the matched value is of type `&tpt_telos_parser::Expr`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern as shown, or multiple match arms
+    |
+407 ~         },
+408 +         _ => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&tpt_telos_parser::Stmt::Let(_)`, `&tpt_telos_parser::Stmt::If(_)`, `&tpt_telos_parser::Stmt::Match(_)` and 1 more not covered
+   --> crates\telos-ir\src\extract.rs:523:29
+    |
+523 |         let assigns = match stmt {
+    |                             ^^^^ patterns `&tpt_telos_parser::Stmt::Let(_)`, `&tpt_telos_parser::Stmt::If(_)`, `&tpt_telos_parser::Stmt::Match(_)` and 1 more not covered
+    |
+note: `tpt_telos_parser::Stmt` defined here
+   --> crates\telos-parser\src\ast.rs:254:1
+    |
+254 | pub enum Stmt {
+    | ^^^^^^^^^^^^^
+...
+260 |     Let(LetBinding),
+    |     --- not covered
+261 |     /// `if expr { stmts } [else { stmts }]`
+262 |     If(IfStmt),
+    |     -- not covered
+263 |     /// `match expr { pattern => stmts, ... }`
+264 |     Match(MatchStmt),
+    |     ----- not covered
+265 |     /// `return [expr];`
+266 |     Return(Option<Expr>),
+    |     ------ not covered
+    = note: the matched value is of type `&tpt_telos_parser::Stmt`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern as shown, or multiple match arms
+    |
+528 ~             },
+529 +             _ => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&tpt_telos_parser::Stmt::Let(_)`, `&tpt_telos_parser::Stmt::If(_)`, `&tpt_telos_parser::Stmt::Match(_)` and 1 more not covered
+   --> crates\telos-ir\src\extract.rs:547:29
+    |
+547 |         let assigns = match stmt {
+    |                             ^^^^ patterns `&tpt_telos_parser::Stmt::Let(_)`, `&tpt_telos_parser::Stmt::If(_)`, `&tpt_telos_parser::Stmt::Match(_)` and 1 more not covered
+    |
+note: `tpt_telos_parser::Stmt` defined here
+   --> crates\telos-parser\src\ast.rs:254:1
+    |
+254 | pub enum Stmt {
+    | ^^^^^^^^^^^^^
+...
+260 |     Let(LetBinding),
+    |     --- not covered
+261 |     /// `if expr { stmts } [else { stmts }]`
+262 |     If(IfStmt),
+    |     -- not covered
+263 |     /// `match expr { pattern => stmts, ... }`
+264 |     Match(MatchStmt),
+    |     ----- not covered
+265 |     /// `return [expr];`
+266 |     Return(Option<Expr>),
+    |     ------ not covered
+    = note: the matched value is of type `&tpt_telos_parser::Stmt`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern as shown, or multiple match arms
+    |
+549 ~             Stmt::Assign(a) => std::slice::from_ref(a),
+550 ~             _ => todo!(),
+    |
+
+For more information about this error, try `rustc --explain E0004`.
+error: could not compile `tpt-telos-ir` (lib) due to 6 previous errors
+warning: build failed, waiting for other jobs to finish...

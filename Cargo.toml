@@ -23,5 +23,8 @@ documentation = "https://docs.rs/tpt-telos"
 keywords = ["verification", "compiler", "transpiler", "smt", "formal-methods"]
 categories = ["compilers", "development-tools", "command-line-utilities"]
 
+[workspace.dev-dependencies]
+proptest = "1"
+
 [profile.release]
 opt-level = 3

@@ -151,3 +151,62 @@ fn eject_writes_manifest_and_project() {
     assert!(dir.join("go/service.go").exists(), "missing go service.go");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---- --strict-rt tests ----
+
+#[test]
+fn strict_rt_fails_on_real_time_go_conflict() {
+    let path = write_temp(
+        "telos_cli_strict_rt_conflict.telos",
+        "@boundary(real_time, network_io) module Ctrl { func tick(x: Int) { } }",
+    );
+    let dir = std::env::temp_dir().join(format!("telos_cli_strict_rt_{}", std::process::id()));
+    let (ok, _, stderr) = run(&[
+        "project",
+        path.to_str().unwrap(),
+        "--out-dir",
+        dir.to_str().unwrap(),
+        "--strict-rt",
+    ]);
+    assert!(
+        !ok,
+        "project --strict-rt should exit non-zero on real_time+Go conflict"
+    );
+    assert!(
+        stderr.contains("strict-rt"),
+        "expected strict-rt error message:\n{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn strict_rt_passes_without_conflict() {
+    let path = write_temp(
+        "telos_cli_strict_rt_clean.telos",
+        "@boundary(real_time) module Ctrl { func tick(x: Int) { } }",
+    );
+    let dir =
+        std::env::temp_dir().join(format!("telos_cli_strict_rt_clean_{}", std::process::id()));
+    let (ok, _, stderr) = run(&[
+        "project",
+        path.to_str().unwrap(),
+        "--out-dir",
+        dir.to_str().unwrap(),
+        "--strict-rt",
+    ]);
+    assert!(
+        ok,
+        "project --strict-rt should pass when no conflict:\n{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn verify_shows_interval_bounded_tag() {
+    let (ok, stdout, _) = run(&["verify", "../../examples/interval.telos"]);
+    assert!(ok, "verify should exit 0 on interval.telos");
+    assert!(
+        stdout.contains("[interval-bounded]"),
+        "expected [interval-bounded] tag:\n{stdout}"
+    );
+}

@@ -30,3 +30,5 @@ clap = { version = "4", features = ["derive"] }
 [features]
 # Enables the `telos transpile --llm` / `build --llm` real LLM backend.
 llm = ["tpt-telos-agent/llm"]
+# Enables the `--solver z3` option for exact nonlinear arithmetic.
+z3 = ["tpt-telos-verifier/z3"]

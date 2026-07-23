@@ -43,6 +43,22 @@ impl Parser {
         }
     }
 
+    /// Accept an identifier or a keyword (used for attribute names like
+    /// `@state(...)`, where `state` is a keyword).
+    fn expect_ident_or_keyword(&mut self) -> Result<String, String> {
+        match self.peek().clone() {
+            Token::Ident(s) => {
+                self.pos += 1;
+                Ok(s)
+            }
+            Token::KwState => {
+                self.pos += 1;
+                Ok("state".to_string())
+            }
+            other => Err(format!("expected identifier, found {}", other)),
+        }
+    }
+
     #[allow(dead_code)]
     fn at_stmt_start(&self) -> bool {
         matches!(
@@ -113,7 +129,7 @@ impl Parser {
 
     fn parse_attribute(&mut self) -> Result<Attribute, String> {
         self.expect(Token::At)?;
-        let name = self.expect_ident()?;
+        let name = self.expect_ident_or_keyword()?;
         let mut args = Vec::new();
         if *self.peek() == Token::LParen {
             self.advance();
@@ -367,6 +383,26 @@ impl Parser {
                     Ok(elems.remove(0))
                 } else {
                     Ok(Type::Tuple(elems))
+                }
+            }
+            Token::LSquare => {
+                // Array or slice type: `[T; N]` or `[T]`
+                self.advance();
+                let elem_ty = self.parse_type()?;
+                if *self.peek() == Token::Semicolon {
+                    self.advance();
+                    let len = match self.peek().clone() {
+                        Token::Int(n) => {
+                            self.advance();
+                            n as usize
+                        }
+                        other => return Err(format!("expected array length, found {}", other)),
+                    };
+                    self.expect(Token::RSquare)?;
+                    Ok(Type::Array(Box::new(elem_ty), len))
+                } else {
+                    self.expect(Token::RSquare)?;
+                    Ok(Type::Slice(Box::new(elem_ty)))
                 }
             }
             Token::Ident(name) => {

@@ -16,6 +16,10 @@ pub enum Type {
     Generic(String, Vec<Type>),
     /// A tuple type, e.g. `(Int, String)`.
     Tuple(Vec<Type>),
+    /// A fixed-length array type, e.g. `[Int; 5]`.
+    Array(Box<Type>, usize),
+    /// A slice type, e.g. `[Int]`.
+    Slice(Box<Type>),
 }
 
 impl Type {
@@ -34,6 +38,8 @@ impl Type {
             Type::Named(s) => s,
             Type::Generic(s, _) => s,
             Type::Tuple(_) => "Tuple",
+            Type::Array(_, _) => "Array",
+            Type::Slice(_) => "Slice",
         }
     }
 

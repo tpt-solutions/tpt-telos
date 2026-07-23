@@ -46,6 +46,10 @@ enum Command {
     Verify {
         /// Path to the .telos source file.
         file: String,
+        /// Solver backend to use. Default: fourier-motzkin (built-in).
+        /// Use `z3` for exact nonlinear arithmetic (requires the `z3` feature).
+        #[arg(long, default_value = "fourier-motzkin")]
+        solver: String,
     },
     /// Run the agentic transpiler and print generated Rust.
     Transpile {
@@ -68,6 +72,9 @@ enum Command {
         /// Use the LLM-backed agent instead of the offline static synthesizer.
         #[arg(long)]
         llm: bool,
+        /// Solver backend to use.
+        #[arg(long, default_value = "fourier-motzkin")]
+        solver: String,
     },
     /// Generate a dual-backend project (Rust + Go) with an automatic FFI bridge.
     Project {
@@ -83,6 +90,10 @@ enum Command {
         /// package (go) to prove both backends build.
         #[arg(long)]
         check: bool,
+        /// Exit non-zero if any module has a real_time or zero_allocation
+        /// routing conflict with Go (GC is non-deterministic).
+        #[arg(long)]
+        strict_rt: bool,
     },
     /// Eject functions to raw Rust/Go opaque blocks guarded by their contracts.
     Eject {
@@ -97,6 +108,10 @@ enum Command {
         /// Use the LLM-backed agent instead of the offline static synthesizer.
         #[arg(long)]
         llm: bool,
+        /// Exit non-zero if any module has a real_time or zero_allocation
+        /// routing conflict with Go (GC is non-deterministic).
+        #[arg(long)]
+        strict_rt: bool,
     },
     /// Run the tpt-telos language server (LSP over stdio) for IDE integration.
     Lsp,
@@ -112,7 +127,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Command::Verify { file } => match run_verify(&file) {
+        Command::Verify { file, solver } => match run_verify(&file, &solver) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -132,7 +147,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Command::Build { file, out_dir, llm } => match run_build(&file, &out_dir, llm) {
+        Command::Build { file, out_dir, llm, solver } => match run_build(&file, &out_dir, llm, &solver) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -150,7 +165,8 @@ fn main() -> ExitCode {
             out_dir,
             llm,
             check,
-        } => match run_project(&file, &out_dir, llm, check) {
+            strict_rt,
+        } => match run_project(&file, &out_dir, llm, check, strict_rt) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -168,7 +184,8 @@ fn main() -> ExitCode {
             out_dir,
             func,
             llm,
-        } => match run_eject(&file, &out_dir, func.as_deref(), llm) {
+            strict_rt,
+        } => match run_eject(&file, &out_dir, func.as_deref(), llm, strict_rt) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("eject error: {e}");
@@ -218,7 +235,32 @@ fn run_parse(file: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn run_verify(file: &str) -> Result<bool, String> {
+fn run_verify(file: &str, solver: &str) -> Result<bool, String> {
+    // Configure solver backend.
+    match solver {
+        "fourier-motzkin" => {}
+        "z3" => {
+            #[cfg(feature = "z3")]
+            {
+                if !tpt_telos_verifier::z3_solver::is_z3_available() {
+                    eprintln!("warning: Z3 not found at runtime; falling back to Fourier-Motzkin");
+                } else {
+                    tpt_telos_verifier::set_solver_backend(
+                        tpt_telos_verifier::SolverBackend::Z3,
+                    );
+                }
+            }
+            #[cfg(not(feature = "z3"))]
+            {
+                eprintln!(
+                    "warning: Z3 solver requires building with `--features z3`; \
+                     falling back to Fourier-Motzkin"
+                );
+            }
+        }
+        other => return Err(format!("unknown solver backend: `{other}`")),
+    }
+
     let modules = load_modules(file)?;
     let problems = tpt_telos_ir::extract(&modules)?;
 
@@ -335,7 +377,32 @@ fn run_transpile(file: &str, llm: bool, out: Option<String>) -> Result<(), Strin
     Ok(())
 }
 
-fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
+fn run_build(file: &str, out_dir: &str, llm: bool, solver: &str) -> Result<bool, String> {
+    // Configure solver backend (same logic as run_verify).
+    match solver {
+        "fourier-motzkin" => {}
+        "z3" => {
+            #[cfg(feature = "z3")]
+            {
+                if !tpt_telos_verifier::z3_solver::is_z3_available() {
+                    eprintln!("warning: Z3 not found at runtime; falling back to Fourier-Motzkin");
+                } else {
+                    tpt_telos_verifier::set_solver_backend(
+                        tpt_telos_verifier::SolverBackend::Z3,
+                    );
+                }
+            }
+            #[cfg(not(feature = "z3"))]
+            {
+                eprintln!(
+                    "warning: Z3 solver requires building with `--features z3`; \
+                     falling back to Fourier-Motzkin"
+                );
+            }
+        }
+        other => return Err(format!("unknown solver backend: `{other}`")),
+    }
+
     let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
     let agent = make_agent(llm)?;
@@ -405,7 +472,13 @@ fn run_build(file: &str, out_dir: &str, llm: bool) -> Result<bool, String> {
     }
 }
 
-fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool, String> {
+fn run_project(
+    file: &str,
+    out_dir: &str,
+    llm: bool,
+    check: bool,
+    strict_rt: bool,
+) -> Result<bool, String> {
     let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
     let agent = make_agent(llm)?;
@@ -439,6 +512,21 @@ fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool
             format!("{:?}", diag.kind).to_lowercase(),
             diag.message
         );
+    }
+
+    // --strict-rt: promote routing conflicts to hard errors.
+    if strict_rt {
+        let has_conflict = project.diagnostics.iter().any(|d| {
+            d.kind == tpt_telos_router::DiagnosticKind::RealTimeGoConflict
+                || d.kind == tpt_telos_router::DiagnosticKind::ZeroAllocGoConflict
+        });
+        if has_conflict {
+            return Err(
+                "strict-rt: routing conflict detected (real_time/zero_allocation \
+                 module routed to Go; see warnings above)"
+                    .into(),
+            );
+        }
     }
 
     let root = std::path::Path::new(out_dir);
@@ -547,7 +635,13 @@ fn run_project(file: &str, out_dir: &str, llm: bool, check: bool) -> Result<bool
     Ok(ok)
 }
 
-fn run_eject(file: &str, out_dir: &str, only: Option<&str>, llm: bool) -> Result<(), String> {
+fn run_eject(
+    file: &str,
+    out_dir: &str,
+    only: Option<&str>,
+    llm: bool,
+    strict_rt: bool,
+) -> Result<(), String> {
     let mut modules = load_modules(file)?;
     let agent = make_agent(llm)?;
 
@@ -591,6 +685,31 @@ fn run_eject(file: &str, out_dir: &str, only: Option<&str>, llm: bool) -> Result
 
     let project = generate_project(&modules, &outcomes);
     let root = std::path::Path::new(out_dir);
+
+    // Surface routing diagnostics as warnings.
+    for diag in &project.diagnostics {
+        eprintln!(
+            "WARNING [{}] {}",
+            format!("{:?}", diag.kind).to_lowercase(),
+            diag.message
+        );
+    }
+
+    // --strict-rt: promote routing conflicts to hard errors.
+    if strict_rt {
+        let has_conflict = project.diagnostics.iter().any(|d| {
+            d.kind == tpt_telos_router::DiagnosticKind::RealTimeGoConflict
+                || d.kind == tpt_telos_router::DiagnosticKind::ZeroAllocGoConflict
+        });
+        if has_conflict {
+            return Err(
+                "strict-rt: routing conflict detected (real_time/zero_allocation \
+                 module routed to Go; see warnings above)"
+                    .into(),
+            );
+        }
+    }
+
     project
         .write(root)
         .map_err(|e| format!("cannot write ejected project to {out_dir}: {e}"))?;
@@ -822,7 +941,13 @@ fn render_assign(a: &Assign) -> String {
 
 fn render_type(t: &Type) -> String {
     match t {
-        Type::Named(s) => s.clone(),
+        Type::Named(s) => match s.as_str() {
+            "Float32" => "f32".to_string(),
+            "Float64" => "f64".to_string(),
+            "Int" => "i64".to_string(),
+            "PositiveInt" => "i64".to_string(),
+            other => other.to_string(),
+        },
         Type::Generic(name, args) => {
             let args: Vec<_> = args.iter().map(render_type).collect();
             format!("{}<{}>", name, args.join(", "))
@@ -831,6 +956,8 @@ fn render_type(t: &Type) -> String {
             let elems: Vec<_> = elems.iter().map(render_type).collect();
             format!("({})", elems.join(", "))
         }
+        Type::Array(elem, len) => format!("[{}; {}]", render_type(elem), len),
+        Type::Slice(elem) => format!("[{}]", render_type(elem)),
     }
 }
 

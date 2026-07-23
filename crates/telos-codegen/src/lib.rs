@@ -259,17 +259,22 @@ fn generate_module(
     types: &TypeFields,
 ) -> String {
     let route = tpt_telos_router::route(&module.attributes);
+    let is_persistent = route.storage == tpt_telos_router::StorageClass::Persistent;
     let mut out = String::new();
     out.push_str(&format!(
-        "// ===== module {} (target: {}) =====\n",
+        "// ===== module {} (target: {}, storage: {}) =====\n",
         module.name,
-        route.target.as_str()
+        route.target.as_str(),
+        if is_persistent { "persistent" } else { "ephemeral" }
     ));
 
     // Structs.
     for (ty, fields) in types {
         if fields.is_empty() {
             continue;
+        }
+        if is_persistent {
+            out.push_str("#[derive(serde::Serialize, serde::Deserialize)]\n");
         }
         out.push_str(&format!("pub struct {} {{\n", ty));
         for f in fields {
@@ -601,7 +606,13 @@ fn render_inv(e: &Expr) -> String {
 
 pub(crate) fn render_type(t: &Type) -> String {
     match t {
-        Type::Named(s) => s.clone(),
+        Type::Named(s) => match s.as_str() {
+            "Float32" => "f32".to_string(),
+            "Float64" => "f64".to_string(),
+            "Int" => "i64".to_string(),
+            "PositiveInt" => "i64".to_string(),
+            other => other.to_string(),
+        },
         Type::Generic(name, args) => {
             let args: Vec<_> = args.iter().map(render_type).collect();
             format!("{}<{}>", name, args.join(", "))
@@ -610,6 +621,8 @@ pub(crate) fn render_type(t: &Type) -> String {
             let elems: Vec<_> = elems.iter().map(render_type).collect();
             format!("({})", elems.join(", "))
         }
+        Type::Array(elem, len) => format!("[{}; {}]", render_type(elem), len),
+        Type::Slice(elem) => format!("[{}]", render_type(elem)),
     }
 }
 
@@ -1025,5 +1038,27 @@ mod tests {
         assert!(rust.contains("pub struct Counter"));
         assert!(rust.contains("pub fn satisfies_invariants"));
         assert!(rust.contains("pub fn f"));
+    }
+
+    #[test]
+    fn persistent_storage_emits_serde_derive() {
+        let src = "@state(persistent) module M { invariant Counter { v >= 0 } func f(c: Counter) requires c.v >= 0 { } }";
+        let modules = tpt_telos_parser::parse(src).unwrap();
+        let rust = generate_program(&modules, &[]);
+        assert!(
+            rust.contains("#[derive(serde::Serialize, serde::Deserialize)]"),
+            "expected serde derive for persistent module:\n{rust}"
+        );
+    }
+
+    #[test]
+    fn ephemeral_storage_no_serde_derive() {
+        let src = "module M { invariant Counter { v >= 0 } func f(c: Counter) requires c.v >= 0 { } }";
+        let modules = tpt_telos_parser::parse(src).unwrap();
+        let rust = generate_program(&modules, &[]);
+        assert!(
+            !rust.contains("serde"),
+            "ephemeral module should not have serde:\n{rust}"
+        );
     }
 }

@@ -79,6 +79,23 @@ pub enum DiagnosticKind {
     ZeroAllocGoConflict,
 }
 
+/// The storage class for a module's data structures, derived from
+/// `@state(persistent)` or `@state(ephemeral)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageClass {
+    /// Database-backed / serializable structs. `persistent` modules emit
+    /// `#[derive(Serialize, Deserialize)]` (Rust) and JSON tags (Go).
+    Persistent,
+    /// Stack-only / transient structs (default). No serialization support.
+    Ephemeral,
+}
+
+impl Default for StorageClass {
+    fn default() -> Self {
+        StorageClass::Ephemeral
+    }
+}
+
 /// The routing decision for a module or function.
 ///
 /// Contains the chosen [`Target`] backend and a human-readable `reason`
@@ -86,6 +103,8 @@ pub enum DiagnosticKind {
 #[derive(Debug, Clone)]
 pub struct Route {
     pub target: Target,
+    /// The storage class derived from `@state(...)`.
+    pub storage: StorageClass,
     /// Human-readable justification, surfaced by the CLI for transparency.
     pub reason: String,
 }
@@ -141,6 +160,36 @@ fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
     flags
 }
 
+/// Parse `@state(persistent)` or `@state(ephemeral)` from module attributes.
+/// Returns `StorageClass::Ephemeral` if no `@state(...)` is present or if the
+/// argument is unrecognised.
+fn parse_storage_class(attrs: &[Attribute]) -> StorageClass {
+    for attr in attrs {
+        if attr.name != "state" {
+            continue;
+        }
+        for arg in &attr.args {
+            if let Arg::Flag(f) = arg {
+                match f.as_str() {
+                    "persistent" => return StorageClass::Persistent,
+                    "ephemeral" => return StorageClass::Ephemeral,
+                    _ => {}
+                }
+            }
+            if let Arg::Kv(k, tpt_telos_parser::ast::Literal::Ident(v)) = arg {
+                if k == "class" {
+                    match v.as_str() {
+                        "persistent" => return StorageClass::Persistent,
+                        "ephemeral" => return StorageClass::Ephemeral,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    StorageClass::default()
+}
+
 /// Route a module from its `@boundary` attributes and emit diagnostics for
 /// potentially unsafe target combinations.
 ///
@@ -167,6 +216,9 @@ fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
 pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<RoutingDiagnostic>) {
     let flags = boundary_flags(attrs);
 
+    // Parse @state(...) for storage class.
+    let storage = parse_storage_class(attrs);
+
     let mut go_hits = Vec::new();
     let mut rust_hits = Vec::new();
     let mut python_hits = Vec::new();
@@ -184,21 +236,25 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
     let route = if !python_hits.is_empty() {
         Route {
             target: Target::Python,
+            storage,
             reason: format!("boundary flags {:?} routed to Python backend", python_hits),
         }
     } else if !go_hits.is_empty() {
         Route {
             target: Target::Go,
+            storage,
             reason: format!("boundary flags {:?} routed to Go backend", go_hits),
         }
     } else if !rust_hits.is_empty() {
         Route {
             target: Target::Rust,
+            storage,
             reason: format!("boundary flags {:?} routed to Rust backend", rust_hits),
         }
     } else {
         Route {
             target: Target::Rust,
+            storage,
             reason: "no explicit boundary flags; defaulting to Rust compute backend".to_string(),
         }
     };
@@ -211,7 +267,8 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
                 module: module_name.to_string(),
                 message: format!(
                     "module `{}` has `real_time` flag but is routed to Go (GC is \
-                     non-deterministic; FADEC/PREEMPT_RT targets must use Rust)",
+                     non-deterministic; FADEC/PREEMPT_RT targets must use Rust; \
+                     see ARCHITECTURE.md § Go GC Determinism)",
                     module_name
                 ),
             });
@@ -222,7 +279,8 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
                 module: module_name.to_string(),
                 message: format!(
                     "module `{}` has `zero_allocation` flag but is routed to Go \
-                     (Go allocates via GC; zero-allocation guarantees cannot be upheld)",
+                     (Go allocates via GC; zero-allocation guarantees cannot be upheld; \
+                     see ARCHITECTURE.md § Go GC Determinism)",
                     module_name
                 ),
             });
@@ -438,5 +496,41 @@ mod tests {
         let (r, diags) = route_checked(&[attr(&["ml_training"])], "TrainLayer");
         assert_eq!(r.target, Target::Python);
         assert!(diags.is_empty());
+    }
+
+    // ---- Storage class ----
+
+    fn state_attr(class: &str) -> Attribute {
+        Attribute {
+            name: "state".to_string(),
+            args: vec![Arg::Flag(class.to_string())],
+        }
+    }
+
+    #[test]
+    fn state_persistent_sets_storage_class() {
+        let r = route(&[state_attr("persistent")]);
+        assert_eq!(r.storage, StorageClass::Persistent);
+    }
+
+    #[test]
+    fn state_ephemeral_sets_storage_class() {
+        let r = route(&[state_attr("ephemeral")]);
+        assert_eq!(r.storage, StorageClass::Ephemeral);
+    }
+
+    #[test]
+    fn no_state_defaults_to_ephemeral() {
+        let r = route(&[]);
+        assert_eq!(r.storage, StorageClass::Ephemeral);
+    }
+
+    #[test]
+    fn state_with_boundary_combines() {
+        let boundary = attr(&["network_io"]);
+        let state = state_attr("persistent");
+        let r = route(&[boundary, state]);
+        assert_eq!(r.target, Target::Go);
+        assert_eq!(r.storage, StorageClass::Persistent);
     }
 }

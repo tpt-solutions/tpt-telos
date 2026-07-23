@@ -340,21 +340,59 @@ fn to_constraints(
     field_fn: &Naming,
     var_fn: &dyn Fn(&str) -> String,
 ) -> Result<Vec<Constraint>, String> {
+    let dnf = to_constraints_dnf(expr, field_fn, var_fn)?;
+    if dnf.len() == 1 {
+        Ok(dnf.into_iter().next().unwrap())
+    } else {
+        Err("disjunction (`||`) is not allowed in this position".into())
+    }
+}
+
+/// Lower a boolean expression into Disjunctive Normal Form (DNF): a list of
+/// conjunction branches. Each inner `Vec<Constraint>` is one branch (a
+/// conjunction of constraints). `||` creates two branches; `&&` flattens
+/// within each branch.
+fn to_constraints_dnf(
+    expr: &Expr,
+    field_fn: &Naming,
+    var_fn: &dyn Fn(&str) -> String,
+) -> Result<Vec<Vec<Constraint>>, String> {
     match expr {
-        Expr::Bin { op, lhs, rhs } if *op == BinOp::And => {
-            let mut out = to_constraints(lhs, field_fn, var_fn)?;
-            out.extend(to_constraints(rhs, field_fn, var_fn)?);
+        Expr::Bin { op, lhs, rhs } if *op == BinOp::Or => {
+            let left = to_constraints_dnf(lhs, field_fn, var_fn)?;
+            let right = to_constraints_dnf(rhs, field_fn, var_fn)?;
+            let mut out = left;
+            out.extend(right);
             Ok(out)
+        }
+        Expr::Bin { op, lhs, rhs } if *op == BinOp::And => {
+            let left = to_constraints_dnf(lhs, field_fn, var_fn)?;
+            let right = to_constraints_dnf(rhs, field_fn, var_fn)?;
+            Ok(combine_dnf(&left, &right))
         }
         Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
             let rel = relation_of(*op).unwrap();
             let l = linearize(lhs, field_fn, var_fn)?;
             let r = linearize(rhs, field_fn, var_fn)?;
             let diff = l.sub(&r);
-            Ok(vec![Constraint(diff, rel)])
+            Ok(vec![vec![Constraint(diff, rel)]])
         }
-        _ => Err("expected a boolean constraint (comparison or `&&`)".into()),
+        _ => Err("expected a boolean constraint (comparison, `&&`, or `||`)".into()),
     }
+}
+
+/// Cartesian product of two DNF forms: every branch in `a` combined with every
+/// branch in `b`.
+fn combine_dnf(a: &[Vec<Constraint>], b: &[Vec<Constraint>]) -> Vec<Vec<Constraint>> {
+    let mut out = Vec::new();
+    for a_branch in a {
+        for b_branch in b {
+            let mut combined = a_branch.clone();
+            combined.extend(b_branch.iter().cloned());
+            out.push(combined);
+        }
+    }
+    out
 }
 
 fn assign_constraint(
@@ -518,7 +556,7 @@ pub fn extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String> {
     for m in modules {
         for item in &m.items {
             if let Item::Func(f) = item {
-                problems.push(build_problem(f, &invariants, &invariant_fields)?);
+                problems.extend(build_problems(f, &invariants, &invariant_fields)?);
             }
         }
     }
@@ -542,55 +580,66 @@ fn collect_vars(expr: &Expr, out: &mut HashSet<String>) {
     }
 }
 
-fn build_problem(
+fn build_problems(
     func: &Func,
     invariants: &HashMap<String, &Invariant>,
     invariant_fields: &HashMap<String, HashSet<String>>,
-) -> Result<VerificationProblem, String> {
+) -> Result<Vec<VerificationProblem>, String> {
     let var_fn = |name: &str| name.to_string();
     let pre_fn = |b: &str, f: &str| pre_field(b, f);
     let post_fn = |b: &str, f: &str| post_field(b, f);
 
-    let mut premises: Vec<Constraint> = Vec::new();
-
-    // requires
+    // Collect requires clauses as DNF branches.
+    // Each requires expression produces one or more branches; we combine them
+    // via Cartesian product so `requires a || b` and `requires c` yields two
+    // branches: {a, c} and {b, c}.
+    let mut premise_dnf: Vec<Vec<Constraint>> = vec![vec![]];
     for r in &func.requires {
-        premises.extend(to_constraints(r, &pre_fn, &var_fn)?);
+        let branches = to_constraints_dnf(r, &pre_fn, &var_fn)?;
+        premise_dnf = combine_dnf(&premise_dnf, &branches);
     }
 
-    // type constraints (e.g. PositiveInt => x >= 1)
+    // type constraints (e.g. PositiveInt => x >= 1) — these are always
+    // conjunctions (no disjunction), so they extend every branch.
+    let mut type_constraints: Vec<Constraint> = Vec::new();
     for p in &func.params {
         if p.ty.name().starts_with("Positive") {
             let ge = Linear::var(&p.name).sub(&Linear::constant_only(1));
-            premises.push(Constraint(ge, Relation::Ge));
+            type_constraints.push(Constraint(ge, Relation::Ge));
         }
     }
 
     // entry invariants for parameters whose type has an invariant
+    let mut inv_constraints: Vec<Constraint> = Vec::new();
     for p in &func.params {
         if let Some(inv) = invariants.get(p.ty.name()) {
             for c in &inv.constraints {
                 let inst = instantiate(c, &p.name);
-                premises.extend(to_constraints(&inst, &pre_fn, &var_fn)?);
+                inv_constraints.extend(to_constraints(&inst, &pre_fn, &var_fn)?);
             }
         }
     }
 
+    // Append type constraints and invariant constraints to every branch.
+    for branch in &mut premise_dnf {
+        branch.extend(type_constraints.iter().cloned());
+        branch.extend(inv_constraints.iter().cloned());
+    }
+
     // mutate state assignments -> equality premises defining post vars
     let mut assigned: HashSet<(String, String)> = HashSet::new();
+    let mut mutation_constraints: Vec<Constraint> = Vec::new();
     for stmt in &func.body {
         let assigns = match stmt {
             Stmt::MutateState(a) => a,
             Stmt::Assign(a) => {
-                premises.push(assign_constraint(a, &pre_fn, &var_fn)?);
+                mutation_constraints.push(assign_constraint(a, &pre_fn, &var_fn)?);
                 std::slice::from_ref(a)
             }
-            // Let, If, Match, Return are not lowered to IR constraints; they
-            // are handled at the codegen/runtime level only.
             _ => continue,
         };
         for a in assigns {
-            premises.push(assign_constraint(a, &pre_fn, &var_fn)?);
+            mutation_constraints.push(assign_constraint(a, &pre_fn, &var_fn)?);
             if let Expr::Field { base, field } = &a.target {
                 assigned.insert((base.clone(), field.clone()));
             }
@@ -619,9 +668,6 @@ fn build_problem(
         }
     }
 
-    // Fields of invariant-bearing parameters are also framed: a `&mut` parameter
-    // of a type with an invariant keeps its invariant unless explicitly mutated,
-    // even if the function body never reads or writes it.
     for p in &func.params {
         if let Some(fields) = invariant_fields.get(p.ty.name()) {
             for f in fields {
@@ -630,64 +676,80 @@ fn build_problem(
         }
     }
 
+    let mut frame_constraints: Vec<Constraint> = Vec::new();
     for (base, field) in &referenced {
         if !assigned.contains(&(base.clone(), field.clone())) {
             let post = Linear::var(&post_field(base, field));
             let pre = Linear::var(&pre_field(base, field));
-            premises.push(Constraint(post.sub(&pre), Relation::Eq));
+            frame_constraints.push(Constraint(post.sub(&pre), Relation::Eq));
         }
     }
 
-    // Derive per-variable bounds from the now-complete premise set.
-    // These are used to linearize nonlinear products in conclusions via
-    // interval-arithmetic bounding (see `linearize_bounded`).
-    let premise_bounds = collect_var_bounds(&premises);
-
-    // conclusions: ensures + exit invariants
-    let mut conclusions: Vec<Conclusion> = Vec::new();
-    for e in &func.ensures {
-        let mut approximated = false;
-        let cs = to_constraints_bounded(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
-        for c in cs {
-            conclusions.push(Conclusion {
-                description: format!("ensures: {}", pretty(e)),
-                constraint: c,
-                is_ensures: true,
-                is_approximation: approximated,
-            });
-        }
+    // Append mutation and frame constraints to every branch.
+    for branch in &mut premise_dnf {
+        branch.extend(mutation_constraints.iter().cloned());
+        branch.extend(frame_constraints.iter().cloned());
     }
-    for p in &func.params {
-        if let Some(inv) = invariants.get(p.ty.name()) {
-            for c in &inv.constraints {
-                let inst = instantiate(c, &p.name);
-                let mut approximated = false;
-                let cs = to_constraints_bounded(
-                    &inst,
-                    &post_fn,
-                    &var_fn,
-                    &premise_bounds,
-                    &mut approximated,
-                )?;
-                for c2 in cs {
-                    conclusions.push(Conclusion {
-                        description: format!(
-                            "invariant {} maintained: {}",
-                            inv.name,
-                            pretty(&inst)
-                        ),
-                        constraint: c2,
-                        is_ensures: false,
-                        is_approximation: approximated,
-                    });
+
+    // Build one VerificationProblem per DNF branch.
+    let mut problems = Vec::new();
+    for (idx, premises) in premise_dnf.iter().enumerate() {
+        let premise_bounds = collect_var_bounds(premises);
+
+        // conclusions: ensures + exit invariants
+        let mut conclusions: Vec<Conclusion> = Vec::new();
+        for e in &func.ensures {
+            let mut approximated = false;
+            let cs = to_constraints_bounded(e, &post_fn, &var_fn, &premise_bounds, &mut approximated)?;
+            for c in cs {
+                conclusions.push(Conclusion {
+                    description: format!("ensures: {}", pretty(e)),
+                    constraint: c,
+                    is_ensures: true,
+                    is_approximation: approximated,
+                });
+            }
+        }
+        for p in &func.params {
+            if let Some(inv) = invariants.get(p.ty.name()) {
+                for c in &inv.constraints {
+                    let inst = instantiate(c, &p.name);
+                    let mut approximated = false;
+                    let cs = to_constraints_bounded(
+                        &inst,
+                        &post_fn,
+                        &var_fn,
+                        &premise_bounds,
+                        &mut approximated,
+                    )?;
+                    for c2 in cs {
+                        conclusions.push(Conclusion {
+                            description: format!(
+                                "invariant {} maintained: {}",
+                                inv.name,
+                                pretty(&inst)
+                            ),
+                            constraint: c2,
+                            is_ensures: false,
+                            is_approximation: approximated,
+                        });
+                    }
                 }
             }
         }
+
+        let func_name = if premise_dnf.len() == 1 {
+            func.name.clone()
+        } else {
+            format!("{}[branch {}]", func.name, idx)
+        };
+
+        problems.push(VerificationProblem {
+            func_name,
+            premises: premises.clone(),
+            conclusions,
+        });
     }
 
-    Ok(VerificationProblem {
-        func_name: func.name.clone(),
-        premises,
-        conclusions,
-    })
+    Ok(problems)
 }

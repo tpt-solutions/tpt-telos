@@ -197,6 +197,38 @@ fn extract_multiple_modules() {
 }
 
 #[test]
+fn extract_cross_module_invariant_reference() {
+    // Module A defines the invariant; module B uses the type.
+    let src = r#"
+        module Types {
+            invariant Wallet { balance >= 0 }
+        }
+        module Bank {
+            func deposit(w: Wallet, amount: PositiveInt)
+                requires amount > 0
+                ensures w.balance == old(w.balance) + amount
+            { mutate state { w.balance += amount } }
+        }
+    "#;
+    let probs = extract(&parse(src).unwrap()).unwrap();
+    // Should produce one problem for `deposit`.
+    assert_eq!(probs.len(), 1);
+    assert_eq!(probs[0].func_name, "deposit");
+    // The invariant from module Types should be applied to the Wallet parameter.
+    // This means the premises include `w.balance >= 0` (from the invariant).
+    assert!(
+        probs[0].premises.iter().any(|c| {
+            c.0.terms
+                .iter()
+                .any(|(v, _)| v == "w.balance")
+                && c.1 == tpt_telos_ir::Relation::Ge
+        }),
+        "expected cross-module invariant premise w.balance >= 0: {:?}",
+        probs[0].premises
+    );
+}
+
+#[test]
 fn extract_rejects_nonlinear_multiplication() {
     // `x * x` is non-linear and must be rejected during extraction.
     let src = "module M { func f(x: i64) ensures x * x == 0 { } }";
@@ -214,4 +246,127 @@ fn extract_rejects_division_by_variable() {
 fn extract_rejects_division_by_zero() {
     let src = "module M { func f(x: i64) ensures x / 0 == 0 { } }";
     assert!(extract(&parse(src).unwrap()).is_err());
+}
+
+// ---- interval bounding (nonlinear products) ----
+
+#[test]
+fn extract_interval_bounding_replaces_product_with_constant() {
+    // When both x and y have known bounds in requires, the nonlinear product
+    // x * y in ensures is over-approximated via interval arithmetic.
+    // x in [0,10], y in [0,5] => max(x*y) = 50.
+    let src = r#"
+        module M {
+            func f(x: Int, y: Int)
+                requires x >= 0
+                requires x <= 10
+                requires y >= 0
+                requires y <= 5
+                ensures x * y <= 50
+            { }
+        }
+    "#;
+    let probs = extract(&parse(src).unwrap()).unwrap();
+    assert_eq!(probs.len(), 1);
+    // The ensures conclusion should be marked as an approximation.
+    let approx = probs[0]
+        .conclusions
+        .iter()
+        .find(|c| c.is_ensures && c.is_approximation)
+        .expect("expected an interval-bounded ensures conclusion");
+    // The nonlinear product was replaced by its interval bound (50),
+    // so the constraint is 50 - 50 <= 0, i.e. constant 0 with no variable terms.
+    assert!(
+        approx.constraint.0.terms.is_empty(),
+        "interval-bounded constraint should be constant-only, got {:?}",
+        approx.constraint.0
+    );
+    assert_eq!(
+        approx.constraint.0.constant, 0,
+        "interval-bounded constraint constant should be 0"
+    );
+}
+
+#[test]
+fn extract_interval_bounding_without_bounds_fails() {
+    // Without bounds on both variables, nonlinear multiplication is rejected.
+    let src = r#"
+        module M {
+            func f(x: Int, y: Int)
+                ensures x * y <= 10
+            { }
+        }
+    "#;
+    assert!(extract(&parse(src).unwrap()).is_err());
+}
+
+#[test]
+fn extract_interval_bounding_with_partial_bounds_fails() {
+    // Only one variable bounded: nonlinear product still rejected.
+    let src = r#"
+        module M {
+            func f(x: Int, y: Int)
+                requires x >= 0
+                requires x <= 10
+                ensures x * y <= 50
+            { }
+        }
+    "#;
+    assert!(extract(&parse(src).unwrap()).is_err());
+}
+
+// ---- disjunction (||) in premises ----
+
+#[test]
+fn extract_disjunction_in_requires_splits_into_branches() {
+    // `requires x > 0 || x < -10` produces two branches.
+    let src = r#"
+        module M {
+            func f(x: Int)
+                requires x > 0 || x < -10
+                ensures x != 0
+            { }
+        }
+    "#;
+    let probs = extract(&parse(src).unwrap()).unwrap();
+    // Two branches: one for x > 0, one for x < -10.
+    assert_eq!(probs.len(), 2);
+    assert!(probs[0].func_name.contains("branch 0"));
+    assert!(probs[1].func_name.contains("branch 1"));
+}
+
+#[test]
+fn extract_disjunction_with_conjunction_combines_correctly() {
+    // `requires (x > 0 && y > 0) || (x < 0 && y < 0)` produces two branches,
+    // each with two constraints from the conjunction.
+    let src = r#"
+        module M {
+            func f(x: Int, y: Int)
+                requires (x > 0 && y > 0) || (x < 0 && y < 0)
+                ensures x != 0
+            { }
+        }
+    "#;
+    let probs = extract(&parse(src).unwrap()).unwrap();
+    assert_eq!(probs.len(), 2);
+    // Each branch has exactly 2 premise constraints (the conjunction members).
+    assert_eq!(probs[0].premises.len(), 2);
+    assert_eq!(probs[1].premises.len(), 2);
+}
+
+#[test]
+fn extract_no_disjunction_produces_single_problem() {
+    // Without ||, there's exactly one problem per function.
+    let src = r#"
+        module M {
+            func f(x: Int)
+                requires x >= 0
+                ensures x >= 0
+            { }
+        }
+    "#;
+    let probs = extract(&parse(src).unwrap()).unwrap();
+    assert_eq!(probs.len(), 1);
+    // The func_name should not contain "branch".
+    assert!(!probs[0].func_name.contains("branch"));
 }

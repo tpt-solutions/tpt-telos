@@ -479,7 +479,13 @@ fn pretty(e: &Expr) -> String {
 
 fn render_type(t: &Type) -> String {
     match t {
-        Type::Named(s) => s.clone(),
+        Type::Named(s) => match s.as_str() {
+            "Float32" => "f32".to_string(),
+            "Float64" => "f64".to_string(),
+            "Int" => "i64".to_string(),
+            "PositiveInt" => "i64".to_string(),
+            other => other.to_string(),
+        },
         Type::Generic(name, args) => {
             let args: Vec<_> = args.iter().map(render_type).collect();
             format!("{}<{}>", name, args.join(", "))
@@ -488,6 +494,8 @@ fn render_type(t: &Type) -> String {
             let elems: Vec<_> = elems.iter().map(render_type).collect();
             format!("({})", elems.join(", "))
         }
+        Type::Array(elem, len) => format!("[{}; {}]", render_type(elem), len),
+        Type::Slice(elem) => format!("[{}]", render_type(elem)),
     }
 }
 

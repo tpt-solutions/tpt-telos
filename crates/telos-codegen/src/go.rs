@@ -83,11 +83,13 @@ fn generate_module(
     types: &TypeFields,
 ) -> String {
     let route = tpt_telos_router::route(&module.attributes);
+    let is_persistent = route.storage == tpt_telos_router::StorageClass::Persistent;
     let mut out = String::new();
     out.push_str(&format!(
-        "// ===== module {} (target: {}) =====\n",
+        "// ===== module {} (target: {}, storage: {}) =====\n",
         module.name,
-        route.target.as_str()
+        route.target.as_str(),
+        if is_persistent { "persistent" } else { "ephemeral" }
     ));
 
     // Structs.
@@ -99,7 +101,15 @@ fn generate_module(
         }
         out.push_str(&format!("type {} struct {{\n", ty));
         for f in fields {
-            out.push_str(&format!("\t{} int64\n", exported(f)));
+            if is_persistent {
+                out.push_str(&format!(
+                    "\t{} int64 `json:\"{}\"`\n",
+                    exported(f),
+                    f
+                ));
+            } else {
+                out.push_str(&format!("\t{} int64\n", exported(f)));
+            }
         }
         out.push_str("}\n\n");
     }
@@ -338,7 +348,13 @@ pub(crate) fn bin_op(op: BinOp) -> &'static str {
 
 pub(crate) fn render_type_go(t: &Type) -> String {
     match t {
-        Type::Named(s) => s.clone(),
+        Type::Named(s) => match s.as_str() {
+            "Float32" => "float32".to_string(),
+            "Float64" => "float64".to_string(),
+            "Int" => "int64".to_string(),
+            "PositiveInt" => "int64".to_string(),
+            other => other.to_string(),
+        },
         Type::Generic(name, args) => {
             let args: Vec<_> = args.iter().map(render_type_go).collect();
             format!("{}<{}>", name, args.join(", "))
@@ -347,5 +363,7 @@ pub(crate) fn render_type_go(t: &Type) -> String {
             let elems: Vec<_> = elems.iter().map(render_type_go).collect();
             format!("({})", elems.join(", "))
         }
+        Type::Array(elem, len) => format!("[{}]{}", len, render_type_go(elem)),
+        Type::Slice(elem) => format!("[]{}", render_type_go(elem)),
     }
 }
