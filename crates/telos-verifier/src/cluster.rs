@@ -137,7 +137,6 @@ impl Clone for FourierMotzkinWorker {
 mod tests {
     use super::*;
     use tpt_telos_ir::{Constraint, Linear, Relation};
-    use tpt_telos_parser::Span;
 
     #[test]
     fn pool_verifies_single_problem() {

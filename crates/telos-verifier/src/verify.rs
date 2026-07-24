@@ -21,6 +21,10 @@ pub struct CheckResult {
     /// only when the solver could construct one (always possible for the
     /// linear cases this verifier handles).
     pub counterexample: Option<Model>,
+    /// Disjunction group: `Some(n)` when this check belongs to disjunction
+    /// group `n` (at least one check in the group must pass). `None` for
+    /// independent checks that must each pass individually.
+    pub or_group: Option<usize>,
 }
 
 /// The aggregate verification result for a single function.
@@ -31,30 +35,26 @@ pub struct VerificationResult {
     pub all_passed: bool,
 }
 
-/// Dispatch check to the configured solver backend.
+/// Verify a single constraint against premises, dispatching to the active
+/// solver backend (Z3 when the `z3` feature is enabled and the backend is set,
+/// otherwise Fourier-Motzkin).
 fn check_entails(premises: &[Constraint], concl: &Constraint) -> bool {
-    match crate::solver_backend() {
-        SolverBackend::FourierMotzkin => entails(premises, concl),
-        #[cfg(feature = "z3")]
-        SolverBackend::Z3 => {
-            for branch in negate(concl) {
-                let mut cs = premises.to_vec();
-                cs.extend(branch);
-                if !crate::z3_solver::z3_unsat(&cs) {
-                    return false;
-                }
-            }
-            true
+    #[cfg(feature = "z3")]
+    {
+        if crate::solver_backend() == crate::SolverBackend::Z3 {
+            return crate::z3_solver::z3_entails(premises, concl);
         }
     }
+    entails(premises, concl)
 }
 
-/// Dispatch counterexample extraction to the configured solver backend.
+/// Extract a counterexample for a failing check, dispatching to the active
+/// solver backend (Z3 when the `z3` feature is enabled and the backend is
+/// set, otherwise Fourier-Motzkin).
 fn check_counterexample(premises: &[Constraint], concl: &Constraint) -> Option<Model> {
-    match crate::solver_backend() {
-        SolverBackend::FourierMotzkin => counterexample(premises, concl),
-        #[cfg(feature = "z3")]
-        SolverBackend::Z3 => {
+    #[cfg(feature = "z3")]
+    {
+        if crate::solver_backend() == crate::SolverBackend::Z3 {
             for branch in negate(concl) {
                 let mut cs = premises.to_vec();
                 cs.extend(branch);
@@ -62,9 +62,10 @@ fn check_counterexample(premises: &[Constraint], concl: &Constraint) -> Option<M
                     return Some(m);
                 }
             }
-            None
+            return None;
         }
     }
+    counterexample(premises, concl)
 }
 
 /// Verify every conclusion of a single function.
@@ -118,6 +119,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
             is_ensures: concl.is_ensures,
             is_approximation: concl.is_approximation,
             counterexample: ce,
+            or_group: concl.or_group,
         });
     }
 
@@ -129,7 +131,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
             groups.entry(g).or_default().push(concl);
         }
     }
-    for (_group_id, group_conclusions) in &groups {
+    for group_conclusions in groups.values() {
         let mut any_passed = false;
         let mut group_results: Vec<CheckResult> = Vec::new();
         for concl in group_conclusions {
@@ -148,6 +150,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
                 is_ensures: concl.is_ensures,
                 is_approximation: concl.is_approximation,
                 counterexample: ce,
+                or_group: concl.or_group,
             });
         }
         if !any_passed {

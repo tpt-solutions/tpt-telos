@@ -180,10 +180,6 @@ pub fn unsat(cs: &[Constraint]) -> bool {
 /// Negate a conclusion into one or more branches (each a conjunction of
 /// constraints) that, conjoined with the premises, must each be unsatisfiable
 /// for the conclusion to be entailed.
-/// Negate a constraint: produce zero or more constraint branches whose
-/// disjunction is the logical negation of `concl`. For example, the negation
-/// of `x >= 5` is `x < 5` (one branch), while the negation of `x == 5` is
-/// `x < 5 || x > 5` (two branches).
 pub fn negate(concl: &Constraint) -> Vec<Vec<Constraint>> {
     let Constraint(lin, rel) = concl;
     let branch = |r: Relation| vec![Constraint(lin.clone(), r)];
@@ -790,5 +786,128 @@ mod extended_tests {
         ];
         let m = model(&cs).expect("should be satisfiable");
         assert!(satisfies_model(&cs, &m), "model {m:?} invalid");
+    }
+}
+
+// ===========================================================================
+// Property-based tests (proptest)
+// ===========================================================================
+
+#[cfg(test)]
+mod proptests {
+    use proptest::prelude::*;
+    use tpt_telos_ir::{Constraint, Linear, Relation};
+
+    fn arb_relation() -> impl Strategy<Value = Relation> {
+        prop_oneof![
+            Just(Relation::Le),
+            Just(Relation::Lt),
+            Just(Relation::Ge),
+            Just(Relation::Gt),
+            Just(Relation::Eq),
+        ]
+    }
+
+    /// Generate a simple linear expression with 0-2 variable terms.
+    fn arb_linear() -> impl Strategy<Value = Linear> {
+        (0..=2usize, -10i64..10i64).prop_flat_map(|(n, constant)| {
+            prop::collection::vec(("var_[a-z]", -10i64..10i64), 0..=n).prop_map(move |terms| {
+                let mut result_terms: Vec<(String, i64)> = Vec::new();
+                for (v, c) in terms {
+                    if c == 0 {
+                        continue;
+                    }
+                    if let Some(existing) = result_terms.iter_mut().find(|(vv, _)| vv == &v) {
+                        existing.1 += c;
+                    } else {
+                        result_terms.push((v, c));
+                    }
+                }
+                result_terms.retain(|(_, c)| *c != 0);
+                Linear {
+                    terms: result_terms,
+                    constant,
+                }
+            })
+        })
+    }
+
+    fn arb_constraint() -> impl Strategy<Value = Constraint> {
+        (arb_linear(), arb_relation()).prop_map(|(lin, rel)| Constraint(lin, rel))
+    }
+
+    fn arb_constraint_set() -> impl Strategy<Value = Vec<Constraint>> {
+        prop::collection::vec(arb_constraint(), 1..=3)
+    }
+
+    proptest! {
+        #[test]
+        fn entails_refl(c in arb_constraint()) {
+            // A constraint always entails itself.
+            prop_assert!(super::entails(std::slice::from_ref(&c), &c));
+        }
+
+        #[test]
+        fn unsat_contradiction(lo in -10i64..0i64, hi in 1i64..10i64) {
+            // x >= hi && x <= lo is unsatisfiable when lo < hi.
+            let cs = vec![
+                Constraint(Linear::var("x").sub(&Linear::constant_only(hi)), Relation::Ge),
+                Constraint(Linear::var("x").sub(&Linear::constant_only(lo)), Relation::Le),
+            ];
+            prop_assert!(super::unsat(&cs));
+        }
+
+        #[test]
+        fn model_satisfies_its_constraints(cs in arb_constraint_set()) {
+            if let Some(m) = super::model(&cs) {
+                prop_assert!(super::satisfies_model(&cs, &m), "model {m:?} invalid");
+            }
+        }
+
+        #[test]
+        fn entails_implies_no_counterexample(premises in arb_constraint_set(), concl in arb_constraint()) {
+            if super::entails(&premises, &concl) {
+                prop_assert!(super::counterexample(&premises, &concl).is_none());
+            }
+        }
+
+        #[test]
+        fn counterexample_satisfies_negated(premises in arb_constraint_set(), concl in arb_constraint()) {
+            if let Some(ce) = super::counterexample(&premises, &concl) {
+                // The counter-example should satisfy premises ∧ ¬conclusion.
+                // The negation produces branches (disjunction); the CE satisfies
+                // at least one branch (the one that made it sat).
+                let mut any_branch_satisfied = false;
+                for branch in super::negate(&concl) {
+                    let mut combined = premises.clone();
+                    combined.extend(branch);
+                    if super::satisfies_model(&combined, &ce) {
+                        any_branch_satisfied = true;
+                        break;
+                    }
+                }
+                prop_assert!(any_branch_satisfied, "CE {ce:?} invalid for no branch");
+            }
+        }
+
+        #[test]
+        fn negation_roundtrip(rel in arb_relation(), coeff in -5i64..5i64, k in -5i64..5i64) {
+            let concl = Constraint(
+                Linear { terms: vec![("x".to_string(), coeff)], constant: k },
+                rel,
+            );
+            let empty: Vec<Constraint> = vec![];
+            let entailed = super::entails(&empty, &concl);
+            let mut neg_unsat = true;
+            for branch in super::negate(&concl) {
+                let mut combined = vec![];
+                combined.extend(branch);
+                if !super::unsat(&combined) {
+                    neg_unsat = false;
+                    break;
+                }
+            }
+            prop_assert_eq!(entailed, neg_unsat);
+        }
     }
 }

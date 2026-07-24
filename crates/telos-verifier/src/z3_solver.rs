@@ -93,3 +93,16 @@ pub fn z3_model(cs: &[Constraint]) -> Option<std::collections::HashMap<String, i
     }
     Some(result)
 }
+
+/// Does `premises` entail `conclusion` using Z3?
+pub fn z3_entails(premises: &[Constraint], concl: &Constraint) -> bool {
+    use crate::solver::negate;
+    for branch in negate(concl) {
+        let mut combined: Vec<Constraint> = premises.to_vec();
+        combined.extend(branch);
+        if !z3_unsat(&combined) {
+            return false;
+        }
+    }
+    true
+}

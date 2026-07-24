@@ -113,6 +113,7 @@
 - [x] **Language feature matrix** — document supported/partial/unsupported constructs in `grammar.ebnf` and `README.md`; eliminates ambiguity for integrators writing FADEC-level control logic.
 
 ## Phase 6: Scale, Precision & Language Completeness
+## Phase 6: Scale, Precision & Language Completeness
 
 - [x] **Distributed SMT solver cluster** — gRPC-based `VerificationProblem` dispatch to a pool of solver workers; enables CI/CV verification at scale without single-machine bottlenecks. (`crates/telos-verifier/src/cluster.rs`)
 - [x] **Z3/CVC5 optional backend** — behind a `--solver z3` flag; falls back to built-in Fourier-Motzkin when unavailable; provides exact nonlinear arithmetic for contracts that interval bounding cannot verify. (`crates/telos-verifier/src/z3_solver.rs`, `--features z3`)

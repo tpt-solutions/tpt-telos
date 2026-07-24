@@ -15,3 +15,6 @@ description = "Intermediate representation and constraint extraction for tpt-tel
 
 [dependencies]
 tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }
+
+[dev-dependencies]
+proptest = "1"

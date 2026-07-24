@@ -276,7 +276,24 @@ fn run_verify(file: &str, solver: &str) -> Result<bool, String> {
     for problem in &problems {
         let result = verify(problem);
         println!("  function {}:", result.func_name);
-        for check in &result.checks {
+
+        // Group checks by or_group for display. Independent checks (or_group=None)
+        // are shown individually; disjunction groups are shown as a group where
+        // at least one must pass.
+        let independent: Vec<_> = result
+            .checks
+            .iter()
+            .filter(|c| c.or_group.is_none())
+            .collect();
+        let mut groups: std::collections::HashMap<usize, Vec<&_>> =
+            std::collections::HashMap::new();
+        for c in &result.checks {
+            if let Some(g) = c.or_group {
+                groups.entry(g).or_default().push(c);
+            }
+        }
+
+        for check in &independent {
             let tag = if check.passed { "PASS" } else { "FAIL" };
             let kind = if check.is_ensures { "ensures " } else { "" };
             let approx = if check.is_approximation {

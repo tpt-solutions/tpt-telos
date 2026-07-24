@@ -9,18 +9,13 @@ module DisjunctionDemo {
 
     // Premise disjunction: at least one of the two preconditions must hold.
     // The verifier creates two sub-problems (one per branch) and both must pass.
-    func increment_or_reset(c: Counter, flag: PositiveInt)
+    // Ensures disjunction: at least one post-condition branch must hold.
+    func increment_or_clamp(c: Counter, flag: PositiveInt)
         requires flag == 1 || flag == 2
-        ensures c.v == old(c.v) + 1 || c.v == 0
+        ensures c.v >= 1 || c.v == 0
     {
-        if flag == 1 {
-            mutate state {
-                c.v += 1
-            }
-        } else {
-            mutate state {
-                c.v = 0
-            }
+        mutate state {
+            c.v += flag
         }
     }
 }

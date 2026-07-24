@@ -50,17 +50,22 @@ NEW IN v0.2.0 (koinon feature set):
   Constant-index arrays   arr[constant] in contracts
 
 PARTIAL / LIMITED:
-  Logical disjunction     ||  supported via DNF normalization in requires/ensures
-  @state(...) semantics   parsed and forwarded to router; storage-class behavior not enforced
-  Floating-point          Float32/Float64 types; IR uses IEEE 754 interval arithmetic
-  Quantifier verification forall with bounded ranges (lo..hi) verified via unrolling
+  Logical disjunction     ||  parsed; DNF normalization for requires (splits into sub-problems);
+                                DNF for ensures with or_group tracking (at least one branch must hold)
+  @state(...) semantics   parsed and forwarded to router; storage-class behavior enforced
+                                (persistent → serde/JSON tags; ephemeral → stack-only)
+  Floating-point types    Float32/Float64 parsed and codegen'd to f32/f64 (Rust) and
+                                float32/float64 (Go); IR tracks as integer constraints
+  Quantifier verification forall is parsed and codegen'd to runtime checks; no formal verification
   Modular verification    Call/MethodCall resolved via callee ensures substitution
   Array/slice contracts   Constant-index access (arr[0]) in contracts; symbolic indices rejected
 
 UNSUPPORTED (parse error or silent drop):
   Strings / booleans      no string or bool literal types
   Symbolic array indices  non-constant index in contracts rejected
-  Cross-module refs       invariant types from other modules not referenceable
+  Array length invariants  arrays parsed ([T; N]) but no IR length/index constraint extraction
+  Cross-module refs       invariant types resolve across modules (global invariant lookup works)
+                                but no explicit cross-module type reference syntax
 
 --------------------------------------------------------------------------------
 
