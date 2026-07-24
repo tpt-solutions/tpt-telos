@@ -59,3 +59,21 @@ jobs:
         with:
           name: coverage
           path: lcov.info
+
+  feature-matrix:
+    name: Feature matrix (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["llm", "z3"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: features-${{ matrix.features }}
+      - name: Check (clippy)
+        run: cargo clippy --workspace --all-targets --features ${{ matrix.features }} -- -D warnings
+      - name: Test
+        run: cargo test --workspace --features ${{ matrix.features }}

@@ -9,8 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/tpt-telos-ir"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["ir", "constraint-solving", "smt", "compiler", "telos"]
+categories = ["compilers", "development-tools"]
 description = "Intermediate representation and constraint extraction for tpt-telos"
 
 [dependencies]

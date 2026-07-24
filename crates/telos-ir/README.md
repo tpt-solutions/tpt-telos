@@ -12,6 +12,16 @@ function's `requires`/`ensures` contracts and invariants in QF_LRA (quantifier-f
 arithmetic) form. This IR is the contract between the parser-side of the pipeline and the
 solver-side.
 
+Beyond straight-line linear lowering, `extract` also handles: disjunction (`requires a || b`) via
+DNF normalization into independent verification branches; bounded `forall i in lo..hi { .. }` and
+`sum`/`min`/`max`/`count` aggregates, unrolled to conjunctions when the range bounds are constants;
+general nested/compound `if`/`match` as arithmetic sub-expressions; modular (Dafny-style)
+verification of `Call`/`MethodCall` sites by substituting the callee's `ensures` as premises
+(rejecting recursive call cycles); and constant-index array/slice access. It performs a
+cross-module type-resolution pass first, so one module's invariant types can appear in another
+module's function signatures. `extract` can fail (e.g. on an unsupported construct or a call cycle),
+so it returns a `Result`.
+
 ## Usage
 
 ```rust
@@ -19,7 +29,7 @@ use tpt_telos_parser::parse;
 use tpt_telos_ir::extract;
 
 let modules = parse(src).unwrap();
-let problems = extract(&modules);
+let problems = extract(&modules).unwrap();
 
 for problem in &problems {
     println!("{}: {} premise(s), {} conclusion(s)",
@@ -33,10 +43,11 @@ for problem in &problems {
 
 | Type | Description |
 |------|-------------|
-| `VerificationProblem` | Per-function record: `func_name`, `premises`, `conclusions` |
+| `extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String>` | AST → IR lowering |
+| `VerificationProblem` | Per-function record: `func_name`, `func_span`, `premises`, `conclusions` |
 | `Constraint` | A single `Linear` expression with a `Relation` (`≤`, `<`, `=`, …) |
 | `Linear` | Sum of `(variable, coefficient)` pairs plus a constant |
-| `Conclusion` | One thing to prove: `description`, `constraint`, `is_ensures` flag |
+| `Conclusion` | One thing to prove: `description`, `constraint`, `is_ensures`, `is_approximation`, `or_group` |
 | `Relation` | `Le`, `Lt`, `Ge`, `Gt`, `Eq`, `Ne` |
 
 ## License

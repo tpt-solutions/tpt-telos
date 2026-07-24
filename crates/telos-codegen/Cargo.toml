@@ -9,8 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/tpt-telos-codegen"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["codegen", "ffi", "transpiler", "rust-to-go", "telos"]
+categories = ["compilers", "development-tools::ffi"]
 description = "Rust/Go dual-backend code generation and FFI bridge for tpt-telos"
 
 [dependencies]

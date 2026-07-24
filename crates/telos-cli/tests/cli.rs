@@ -210,3 +210,111 @@ fn verify_shows_interval_bounded_tag() {
         "expected [interval-bounded] tag:\n{stdout}"
     );
 }
+
+#[test]
+fn init_creates_scaffold_file() {
+    let path = std::env::temp_dir().join(format!("telos_cli_init_{}.telos", std::process::id()));
+    let (ok, stdout, stderr) = run(&[
+        "init",
+        "--module",
+        "Ledger",
+        "--out",
+        path.to_str().unwrap(),
+    ]);
+    assert!(ok, "init should exit 0: {stderr}");
+    assert!(
+        stdout.contains("Scaffolded"),
+        "expected scaffold message:\n{stdout}"
+    );
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        content.contains("module Ledger"),
+        "generated file should contain module Ledger:\n{content}"
+    );
+    assert!(
+        content.contains("func increment"),
+        "generated file should contain a func:\n{content}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+// ---- --json output tests ----
+
+#[test]
+fn verify_json_outputs_valid_json() {
+    let (ok, stdout, _) = run(&["verify", WALLET, "--json"]);
+    assert!(ok, "verify --json should exit 0 on valid module");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
+    assert_eq!(v["passed"], true, "passed should be true");
+    assert!(
+        v["functions"].is_array(),
+        "functions should be an array:\n{stdout}"
+    );
+    let funcs = v["functions"].as_array().unwrap();
+    assert!(
+        !funcs.is_empty(),
+        "should have at least one function result"
+    );
+    assert!(
+        funcs[0]["func_name"].is_string(),
+        "func_name should be a string"
+    );
+    assert!(funcs[0]["checks"].is_array(), "checks should be an array");
+}
+
+#[test]
+fn verify_json_on_broken_module() {
+    let (ok, stdout, _) = run(&["verify", BROKEN, "--json"]);
+    assert!(!ok, "verify --json should exit non-zero on broken module");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
+    assert_eq!(v["passed"], false, "passed should be false");
+    let funcs = v["functions"].as_array().unwrap();
+    let has_fail = funcs
+        .iter()
+        .any(|f| !f["all_passed"].as_bool().unwrap_or(true));
+    assert!(
+        has_fail,
+        "at least one function should have all_passed=false"
+    );
+}
+
+#[test]
+fn build_json_outputs_proof_hash() {
+    let dir = std::env::temp_dir().join(format!("telos_cli_build_json_{}", std::process::id()));
+    let (ok, stdout, stderr) = run(&[
+        "build",
+        WALLET,
+        "--out-dir",
+        dir.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(ok, "build --json should exit 0:\n{stderr}");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
+    assert!(v["proof_hash"].is_string(), "proof_hash should be a string");
+    assert!(
+        v["proof_hash"].as_str().unwrap().starts_with("sha256:"),
+        "proof_hash should start with sha256:"
+    );
+    assert!(v["out_dir"].is_string(), "out_dir should be a string");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn verify_manifest_passes_for_intact_build() {
+    let dir =
+        std::env::temp_dir().join(format!("telos_cli_verify_manifest_{}", std::process::id()));
+    // First build to generate the proof manifest.
+    let (ok, _, stderr) = run(&["build", WALLET, "--out-dir", dir.to_str().unwrap()]);
+    assert!(ok, "build should exit 0:\n{stderr}");
+    let manifest_path = dir.join("telos-proof.json");
+    assert!(manifest_path.exists(), "telos-proof.json should exist");
+
+    // Now verify-manifest against the same source.
+    let (ok, stdout, stderr) = run(&["verify-manifest", manifest_path.to_str().unwrap(), WALLET]);
+    assert!(ok, "verify-manifest should exit 0:\n{stderr}");
+    assert!(
+        stdout.contains("MANIFEST OK"),
+        "expected MANIFEST OK:\n{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

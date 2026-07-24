@@ -236,7 +236,7 @@ fn build_prompt(spec: &FuncSpec, ce: Option<&Model>) -> String {
         let inner = f
             .body
             .iter()
-            .map(|s| pretty_stmt(s))
+            .map(pretty_stmt)
             .collect::<Vec<_>>()
             .join("\n");
         format!("current body:\n{}", inner)
@@ -292,6 +292,41 @@ fn pretty(e: &Expr) -> String {
             };
             format!("{} {} {}", pretty(lhs), s, pretty(rhs))
         }
+        Expr::Call(c) => {
+            let args: Vec<_> = c.args.iter().map(pretty).collect();
+            format!("{}({})", c.func, args.join(", "))
+        }
+        Expr::MethodCall(m) => {
+            let args: Vec<_> = m.args.iter().map(pretty).collect();
+            format!("{}.{}({})", pretty(&m.receiver), m.method, args.join(", "))
+        }
+        Expr::Index(i) => format!("{}[{}]", pretty(&i.receiver), pretty(&i.index)),
+        Expr::If(i) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            pretty(&i.condition),
+            pretty(&i.then_expr),
+            pretty(&i.else_expr)
+        ),
+        Expr::Match(m) => {
+            let arms: Vec<_> = m
+                .arms
+                .iter()
+                .map(|a| format!("... => {}", pretty(&a.expr)))
+                .collect();
+            format!("match {} {{ {} }}", pretty(&m.scrutinee), arms.join(", "))
+        }
+        Expr::Try(e) => format!("{}?", pretty(e)),
+        Expr::Forall(f) => format!(
+            "forall {}: {} {{ {} }}",
+            f.var,
+            f.var_ty.name(),
+            pretty(&f.body)
+        ),
+        Expr::Aggregate(a) => {
+            let args: Vec<_> = a.args.iter().map(pretty).collect();
+            format!("{}({})", a.op.op_name(), args.join(", "))
+        }
+        Expr::Range { lo, hi } => format!("{}..{}", pretty(lo), pretty(hi)),
     }
 }
 
@@ -306,6 +341,52 @@ fn pretty_stmt(s: &Stmt) -> String {
             format!("mutate state {{\n{}\n}}", inner)
         }
         Stmt::Assign(a) => pretty_assign(a),
+        Stmt::Let(l) => format!("let {} = {};", l.name, pretty(&l.value)),
+        Stmt::If(i) => {
+            let then_inner = i
+                .then_body
+                .iter()
+                .map(pretty_stmt)
+                .collect::<Vec<_>>()
+                .join("\n");
+            match &i.else_body {
+                Some(else_body) => {
+                    let else_inner = else_body
+                        .iter()
+                        .map(pretty_stmt)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        "if {} {{\n{}\n}} else {{\n{}\n}}",
+                        pretty(&i.condition),
+                        then_inner,
+                        else_inner
+                    )
+                }
+                None => format!("if {} {{\n{}\n}}", pretty(&i.condition), then_inner),
+            }
+        }
+        Stmt::Match(m) => {
+            let arms = m
+                .arms
+                .iter()
+                .map(|a| {
+                    let body = a
+                        .body
+                        .iter()
+                        .map(pretty_stmt)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!("... => {{\n{}\n}}", body)
+                })
+                .collect::<Vec<_>>()
+                .join(",\n");
+            format!("match {} {{\n{}\n}}", pretty(&m.scrutinee), arms)
+        }
+        Stmt::Return(e) => match e {
+            Some(e) => format!("return {};", pretty(e)),
+            None => "return;".to_string(),
+        },
     }
 }
 

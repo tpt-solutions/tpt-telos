@@ -19,7 +19,7 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
-pub use analysis::{analyze, diagnostics, hover_markdown, Diagnostic};
+pub use analysis::{analyze, code_actions, diagnostics, hover_markdown, Diagnostic, QuickFix};
 
 /// The language server state: open documents and lifecycle flags.
 pub struct Server {
@@ -118,7 +118,8 @@ impl Server {
                 json!({
                     "capabilities": {
                         "textDocumentSync": 1,
-                        "hoverProvider": true
+                        "hoverProvider": true,
+                        "codeActionProvider": true
                     },
                     "serverInfo": { "name": "telos-lsp", "version": env!("CARGO_PKG_VERSION") }
                 }),
@@ -184,6 +185,37 @@ impl Server {
                     .map(|md| json!({ "contents": { "kind": "markdown", "value": md } }))
                     .unwrap_or(Value::Null);
                 vec![response(id, result)]
+            }
+            "textDocument/codeAction" => {
+                let uri = msg["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let actions: Vec<Value> = self
+                    .documents
+                    .get(&uri)
+                    .map(|text| code_actions(text))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|fix| {
+                        json!({
+                            "title": fix.title,
+                            "kind": "quickfix",
+                            "edit": {
+                                "changes": {
+                                    uri.clone(): [{
+                                        "range": {
+                                            "start": { "line": fix.line, "character": 0 },
+                                            "end": { "line": fix.line, "character": 0 }
+                                        },
+                                        "newText": fix.new_text
+                                    }]
+                                }
+                            }
+                        })
+                    })
+                    .collect();
+                vec![response(id, json!(actions))]
             }
             "telos/verify" => {
                 let uri = msg["params"]["uri"].as_str().unwrap_or("");
@@ -435,6 +467,34 @@ mod tests {
         assert_eq!(back, msg);
         // Second read hits EOF.
         assert!(read_message(&mut reader).unwrap().is_none());
+    }
+
+    #[test]
+    fn handle_code_action_suggests_requires_fix() {
+        let mut s = Server::new();
+        let src = r#"
+            module Bank {
+                invariant Wallet { balance >= 0 }
+                func withdraw(w: Wallet, amount: Int)
+                    ensures w.balance == old(w.balance) - amount
+                { mutate state { w.balance -= amount } }
+            }
+        "#;
+        s.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "u", "text": src } }
+        }));
+        let out = s.handle(&json!({
+            "jsonrpc": "2.0", "id": 2, "method": "textDocument/codeAction",
+            "params": { "textDocument": { "uri": "u" } }
+        }));
+        let actions = out[0]["result"].as_array().unwrap();
+        assert!(!actions.is_empty());
+        assert_eq!(actions[0]["kind"], json!("quickfix"));
+        assert!(actions[0]["edit"]["changes"]["u"][0]["newText"]
+            .as_str()
+            .unwrap()
+            .contains("requires"));
     }
 
     #[test]

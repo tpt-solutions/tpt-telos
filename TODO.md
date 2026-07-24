@@ -127,7 +127,7 @@
 
 ## Phase 7: Verification Result Quality & Contract-Language Completeness
 
-- [ ] **Surface counterexamples from `telos verify`** — `CheckResult` gains a
+- [x] **Surface counterexamples from `telos verify`** — `CheckResult` gains a
   `counterexample: Option<Model>` populated via the existing
   `solver::counterexample()`; CLI and LSP print/report the concrete witness
   on every `FAIL`, not just the restated clause text. (`crates/telos-verifier/src/verify.rs`,
@@ -186,7 +186,7 @@
     enabled, verification uses Z3 instead of Fourier-Motzkin. The `negate`
     function in `solver.rs` was made `pub` to support this dispatch.
 
-## Status: tpt-telos v1.1 — Phase 7 complete.
+## Status: tpt-telos v1.2 — Phase 7 complete.
 
 The full pipeline is in place: parser -> IR/constraint extraction -> SMT-style
 verifier -> agentic transpiler (Generate -> Verify -> Counter-example ->
@@ -226,3 +226,37 @@ Phase 7 additions:
 - [x] Add regression fixtures under `examples/` for each bug found going forward, and wire them into an existing or new integration test. (`examples/nested.telos` wired into `telos-verifier/tests/nested.rs`.)
 - [x] Set up `cargo llvm-cov` in CI to track coverage per-crate and fail below an agreed threshold. (`.github/workflows/ci.yml`, `--fail-under-lines 75`.)
 - [x] **Milestone:** every crate in the workspace has unit tests for its core logic and at least one integration test; CI enforces a minimum coverage threshold.
+
+## Phase 8: DX, Automation & Tooling Backlog
+
+> Findings from a platform review (bugs, gaps, usability). One bug was found and fixed;
+> the rest are proposed follow-ups, not yet implemented.
+
+- [x] **Fix `telos verify` disjunction-group exit code** — the CLI's disjunction-group
+  display block was flipping `overall = false` for every failing branch in a group instead
+  of only when the whole group failed, causing `telos verify` to exit non-zero / print
+  `RESULT: verification failed` even when every function's `all_passed` was true. Fixed to
+  match `VerificationResult::all_passed` semantics (group fails only if no member passes).
+  (`crates/telos-cli/src/main.rs`)
+- [x] **Machine-readable `--json` output** — `--json` flag added to `telos verify`/`build`/
+  `project` emitting `{file, passed, functions[{func_name, all_passed, checks[]}], proof_hash,
+  ...}` so CI, editors, and the LSP can share one output format instead of each re-deriving
+  pass/fail independently. (`crates/telos-cli/src/main.rs`, `tests/cli.rs`)
+- [x] **`telos init`/`new` scaffold** — `telos init [--module NAME] [--out PATH]` generates a
+  starter module + invariant + func skeleton, to lower the barrier for first-time users.
+  (`crates/telos-cli/src/main.rs`, `tests/cli.rs`)
+- [x] **Watch mode** — a `--watch` flag on `telos verify` polls the source file's mtime and
+  re-verifies on change, to tighten the edit-verify loop. (`crates/telos-cli/src/main.rs`)
+- [x] **Feature-matrix CI job** — added a `feature-matrix` job to CI building/testing/linting
+  with `--features llm` and `--features z3` separately so regressions behind those flags
+  don't ship silently. (`.github/workflows/ci.yml`)
+- [x] **`telos verify-manifest` command** — `telos verify-manifest <manifest.json> <source>`
+  re-hashes the source against a previously generated `telos-proof.json` and reports
+  match/drift, making the existing cryptographic proof manifest (Phase 5) load-bearing for
+  tamper-evidence. (`crates/telos-codegen/src/proof.rs`, `crates/telos-cli/src/main.rs`,
+  `tests/cli.rs`)
+- [x] **LSP quick-fix code actions** — `textDocument/codeAction` now returns a `quickfix`
+  `CodeAction` per failing check with a counterexample, inserting a `requires !(...)` clause
+  that excludes the concrete witness the solver found (a starting point, not a guaranteed
+  fix), advertised via `codeActionProvider: true`. (`crates/telos-lsp/src/analysis.rs`,
+  `crates/telos-lsp/src/lib.rs`)

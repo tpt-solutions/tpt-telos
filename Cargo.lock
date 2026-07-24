@@ -955,6 +955,8 @@ name = "tpt-telos"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "serde",
+ "serde_json",
  "tpt-telos-agent",
  "tpt-telos-codegen",
  "tpt-telos-ir",

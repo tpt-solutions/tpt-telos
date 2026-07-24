@@ -9,8 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/tpt-telos-lsp"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["lsp", "language-server", "ide", "jsonrpc", "telos"]
+categories = ["development-tools", "text-editors"]
 description = "Language Server Protocol server for tpt-telos"
 
 [dependencies]

@@ -272,6 +272,71 @@ pub fn hover_markdown(text: &str, line: usize, character: usize) -> Option<Strin
     Some(md)
 }
 
+/// A suggested quick-fix: insert a new `requires` clause into a function that
+/// rules out a concrete counterexample witness for one of its failing checks.
+/// This is a starting point for the developer to refine, not a guaranteed fix
+/// (it only excludes the exact witness the solver found).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickFix {
+    pub title: String,
+    /// 0-based line to insert `new_text` before.
+    pub line: usize,
+    pub new_text: String,
+}
+
+/// Derive quick-fix `requires` suggestions from every failing check that has
+/// a counterexample. Returns one suggestion per (function, failing check)
+/// pair; ejected and fully-verified functions contribute nothing.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_lsp::analysis::code_actions;
+///
+/// let src = r#"
+///     module Bank {
+///         invariant Wallet { balance >= 0 }
+///         func withdraw(w: Wallet, amount: Int)
+///             ensures w.balance == old(w.balance) - amount
+///         { mutate state { w.balance -= amount } }
+///     }
+/// "#;
+///
+/// let fixes = code_actions(src);
+/// assert!(!fixes.is_empty());
+/// assert!(fixes[0].new_text.contains("requires"));
+/// ```
+pub fn code_actions(text: &str) -> Vec<QuickFix> {
+    let reports = match analyze(text) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut fixes = Vec::new();
+    for r in &reports {
+        if r.verified || r.ejected {
+            continue;
+        }
+        for (desc, ce) in &r.counterexamples {
+            if ce.is_empty() {
+                continue;
+            }
+            let mut keys: Vec<_> = ce.keys().cloned().collect();
+            keys.sort();
+            let clause = keys
+                .iter()
+                .map(|k| format!("{} == {}", k, ce[k]))
+                .collect::<Vec<_>>()
+                .join(" && ");
+            fixes.push(QuickFix {
+                title: format!("Add `requires` excluding counterexample for `{}`", desc),
+                line: r.line + 1,
+                new_text: format!("    requires !({})\n", clause),
+            });
+        }
+    }
+    fixes
+}
+
 // ---------------------------------------------------------------- helpers
 
 fn signature(f: &Func) -> String {

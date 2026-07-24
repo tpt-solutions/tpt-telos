@@ -13,8 +13,13 @@ Helix, and any other LSP-capable editor).
 On every document change it runs the full pipeline — parse → IR → verify → route → agent → codegen
 — and surfaces the results as:
 
-- **Diagnostics** — parse errors and unsatisfied `requires`/`ensures` contracts, with source spans.
+- **Diagnostics** — parse errors and unsatisfied `requires`/`ensures` contracts, with source spans
+  and, where the solver found one, a concrete counterexample. Ejected functions are reported as an
+  informational note (trusted, boundary-guarded) rather than an error.
 - **Hover** — function signature, routing target (Rust/Go), contracts, and verification status.
+- **Code actions** — a `quickfix` per failing check with a counterexample, inserting a `requires
+  !(...)` clause that excludes the concrete witness the solver found (a starting point to refine,
+  not a guaranteed fix).
 - **`telos/verify`** — custom request returning a full verification summary for the open file.
 - **`telos/eject`** — custom request returning a preview of the ejected Rust/Go with contract guards.
 
@@ -52,6 +57,7 @@ let responses = server.handle(&serde_json::json!({
 | `initialize` / `initialized` / `shutdown` / `exit` | Lifecycle |
 | `textDocument/didOpen`, `didChange`, `didSave`, `didClose` | Document sync |
 | `textDocument/hover` | Hover info |
+| `textDocument/codeAction` | Quick-fix `requires` suggestions from failing checks' counterexamples |
 | `telos/verify` | Full verification summary (custom) |
 | `telos/eject` | Ejected code preview (custom) |
 

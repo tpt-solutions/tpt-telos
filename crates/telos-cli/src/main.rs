@@ -12,6 +12,7 @@
 //!   telos lsp                       run the language server (LSP over stdio)
 
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use std::fs;
 use std::process::ExitCode;
 
@@ -37,6 +38,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Scaffold a starter .telos module file.
+    Init {
+        /// Name of the module to generate (default: "MyModule").
+        #[arg(long, default_value = "MyModule")]
+        module: String,
+        /// Output file path (default: <module>.telos).
+        #[arg(long)]
+        out: Option<String>,
+    },
     /// Parse a .telos file and print its AST.
     Parse {
         /// Path to the .telos source file.
@@ -50,6 +60,12 @@ enum Command {
         /// Use `z3` for exact nonlinear arithmetic (requires the `z3` feature).
         #[arg(long, default_value = "fourier-motzkin")]
         solver: String,
+        /// Emit machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+        /// Re-run verification automatically when the source file changes.
+        #[arg(long)]
+        watch: bool,
     },
     /// Run the agentic transpiler and print generated Rust.
     Transpile {
@@ -75,6 +91,9 @@ enum Command {
         /// Solver backend to use.
         #[arg(long, default_value = "fourier-motzkin")]
         solver: String,
+        /// Emit machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
     },
     /// Generate a dual-backend project (Rust + Go) with an automatic FFI bridge.
     Project {
@@ -94,6 +113,9 @@ enum Command {
         /// routing conflict with Go (GC is non-deterministic).
         #[arg(long)]
         strict_rt: bool,
+        /// Emit machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
     },
     /// Eject functions to raw Rust/Go opaque blocks guarded by their contracts.
     Eject {
@@ -113,6 +135,13 @@ enum Command {
         #[arg(long)]
         strict_rt: bool,
     },
+    /// Verify a proof manifest against the current source file.
+    VerifyManifest {
+        /// Path to the telos-proof.json manifest.
+        manifest: String,
+        /// Path to the original .telos source file.
+        source: String,
+    },
     /// Run the tpt-telos language server (LSP over stdio) for IDE integration.
     Lsp,
 }
@@ -120,6 +149,13 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        Command::Init { module, out } => match run_init(&module, out.as_deref()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("init error: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Parse { file } => match run_parse(&file) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -127,7 +163,12 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Command::Verify { file, solver } => match run_verify(&file, &solver) {
+        Command::Verify {
+            file,
+            solver,
+            json,
+            watch,
+        } => match run_verify(&file, &solver, json, watch) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -152,7 +193,8 @@ fn main() -> ExitCode {
             out_dir,
             llm,
             solver,
-        } => match run_build(&file, &out_dir, llm, &solver) {
+            json,
+        } => match run_build(&file, &out_dir, llm, &solver, json) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -171,7 +213,8 @@ fn main() -> ExitCode {
             llm,
             check,
             strict_rt,
-        } => match run_project(&file, &out_dir, llm, check, strict_rt) {
+            json,
+        } => match run_project(&file, &out_dir, llm, check, strict_rt, json) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -197,6 +240,15 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::VerifyManifest { manifest, source } => {
+            match run_verify_manifest(&manifest, &source) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("verify-manifest error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Lsp => match tpt_telos_lsp::run_stdio() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -232,6 +284,43 @@ fn canonicalize_go(go_dir: &std::path::Path) {
     }
 }
 
+fn run_init(module_name: &str, out: Option<&str>) -> Result<(), String> {
+    let default_path = format!("{}.telos", module_name);
+    let path = out.unwrap_or(&default_path);
+    let template = format!(
+        "@boundary(cpu_bound)\n\
+         module {mod} {{\n\
+         \n\
+             invariant Counter {{\n\
+                 count >= 0\n\
+             }}\n\
+         \n\
+             func increment(c: Counter)\n\
+                 requires c.count >= 0\n\
+                 ensures c.count == old(c.count) + 1\n\
+             {{\n\
+                 mutate state {{\n\
+                     c.count += 1\n\
+                 }}\n\
+             }}\n\
+         \n\
+             func get(c: Counter): Int\n\
+                 requires c.count >= 0\n\
+                 ensures result == c.count\n\
+             {{\n\
+                 mutate state {{\n\
+                     return c.count\n\
+                 }}\n\
+             }}\n\
+         }}\n",
+        mod = module_name,
+    );
+    fs::write(path, &template).map_err(|e| format!("cannot write `{path}`: {e}"))?;
+    println!("Scaffolded {path} with module `{module_name}`.");
+    println!("Run `telos verify {path}` to verify the contracts.");
+    Ok(())
+}
+
 fn run_parse(file: &str) -> Result<(), String> {
     let modules = load_modules(file)?;
     for m in &modules {
@@ -240,7 +329,88 @@ fn run_parse(file: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn run_verify(file: &str, solver: &str) -> Result<bool, String> {
+// ---------------------------------------------------------------------------
+// Machine-readable JSON output types
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct JsonCheck {
+    description: String,
+    passed: bool,
+    is_ensures: bool,
+    is_approximation: bool,
+    counterexample: Option<std::collections::HashMap<String, i64>>,
+    or_group: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct JsonFuncResult {
+    func_name: String,
+    all_passed: bool,
+    checks: Vec<JsonCheck>,
+}
+
+#[derive(Serialize)]
+struct JsonVerifyOutput {
+    file: String,
+    passed: bool,
+    functions: Vec<JsonFuncResult>,
+}
+
+#[derive(Serialize)]
+struct JsonBuildOutput {
+    file: String,
+    passed: bool,
+    out_dir: String,
+    functions: Vec<JsonFuncResult>,
+    proof_hash: Option<String>,
+}
+
+#[derive(Serialize)]
+struct JsonProjectOutput {
+    file: String,
+    passed: bool,
+    out_dir: String,
+    functions: Vec<JsonFuncResult>,
+    proof_hash: Option<String>,
+    has_rust: bool,
+    has_go: bool,
+    has_python: bool,
+    has_ffi: bool,
+}
+
+fn collect_verify_output(
+    problems: &[tpt_telos_ir::VerificationProblem],
+) -> (Vec<JsonFuncResult>, bool) {
+    let mut functions = Vec::new();
+    let mut overall = true;
+    for problem in problems {
+        let result = verify(problem);
+        let checks: Vec<JsonCheck> = result
+            .checks
+            .iter()
+            .map(|c| JsonCheck {
+                description: c.description.clone(),
+                passed: c.passed,
+                is_ensures: c.is_ensures,
+                is_approximation: c.is_approximation,
+                counterexample: c.counterexample.clone(),
+                or_group: c.or_group,
+            })
+            .collect();
+        if !result.all_passed {
+            overall = false;
+        }
+        functions.push(JsonFuncResult {
+            func_name: result.func_name,
+            all_passed: result.all_passed,
+            checks,
+        });
+    }
+    (functions, overall)
+}
+
+fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool, String> {
     // Configure solver backend.
     match solver {
         "fourier-motzkin" => {}
@@ -264,62 +434,121 @@ fn run_verify(file: &str, solver: &str) -> Result<bool, String> {
         other => return Err(format!("unknown solver backend: `{other}`")),
     }
 
-    let modules = load_modules(file)?;
-    let problems = tpt_telos_ir::extract(&modules)?;
+    let run_once = |json_mode: bool| -> Result<bool, String> {
+        let modules = load_modules(file)?;
+        let problems = tpt_telos_ir::extract(&modules)?;
 
-    if problems.is_empty() {
-        eprintln!("warning: no functions found to verify in `{file}`");
-    }
-
-    let mut overall = true;
-    println!("Verifying {}\n", file);
-    for problem in &problems {
-        let result = verify(problem);
-        println!("  function {}:", result.func_name);
-
-        // Group checks by or_group for display. Independent checks (or_group=None)
-        // are shown individually; disjunction groups are shown as a group where
-        // at least one must pass.
-        let independent: Vec<_> = result
-            .checks
-            .iter()
-            .filter(|c| c.or_group.is_none())
-            .collect();
-        let mut groups: std::collections::HashMap<usize, Vec<&_>> =
-            std::collections::HashMap::new();
-        for c in &result.checks {
-            if let Some(g) = c.or_group {
-                groups.entry(g).or_default().push(c);
-            }
+        if problems.is_empty() {
+            eprintln!("warning: no functions found to verify in `{file}`");
         }
 
-        for check in &independent {
-            let tag = if check.passed { "PASS" } else { "FAIL" };
-            let kind = if check.is_ensures { "ensures " } else { "" };
-            let approx = if check.is_approximation {
-                " [interval-bounded]"
-            } else {
-                ""
+        if json_mode {
+            let (functions, overall) = collect_verify_output(&problems);
+            let output = JsonVerifyOutput {
+                file: file.to_string(),
+                passed: overall,
+                functions,
             };
-            println!("    [{}] {}{}{}", tag, kind, check.description, approx);
-            if !check.passed {
-                overall = false;
-                if let Some(ce) = &check.counterexample {
-                    let bindings: Vec<_> = ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
-                    println!("      counterexample: {{{}}}", bindings.join(", "));
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            return Ok(overall);
+        }
+
+        let mut overall = true;
+        println!("Verifying {}\n", file);
+        for problem in &problems {
+            let result = verify(problem);
+            println!("  function {}:", result.func_name);
+
+            let independent: Vec<_> = result
+                .checks
+                .iter()
+                .filter(|c| c.or_group.is_none())
+                .collect();
+            let mut groups: std::collections::HashMap<usize, Vec<&_>> =
+                std::collections::HashMap::new();
+            for c in &result.checks {
+                if let Some(g) = c.or_group {
+                    groups.entry(g).or_default().push(c);
                 }
             }
+
+            for check in &independent {
+                let tag = if check.passed { "PASS" } else { "FAIL" };
+                let kind = if check.is_ensures { "ensures " } else { "" };
+                let approx = if check.is_approximation {
+                    " [interval-bounded]"
+                } else {
+                    ""
+                };
+                println!("    [{}] {}{}{}", tag, kind, check.description, approx);
+                if !check.passed {
+                    overall = false;
+                    if let Some(ce) = &check.counterexample {
+                        let bindings: Vec<_> =
+                            ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                        println!("      counterexample: {{{}}}", bindings.join(", "));
+                    }
+                }
+            }
+
+            let mut group_keys: Vec<_> = groups.keys().copied().collect();
+            group_keys.sort();
+            for gk in group_keys {
+                let members = &groups[&gk];
+                let group_any_passed = members.iter().any(|c| c.passed);
+                let group_tag = if group_any_passed { "PASS" } else { "FAIL" };
+                println!("    [{}] disjunction group {}:", group_tag, gk);
+                for check in members {
+                    let tag = if check.passed { "PASS" } else { "FAIL" };
+                    let kind = if check.is_ensures { "ensures " } else { "" };
+                    let approx = if check.is_approximation {
+                        " [interval-bounded]"
+                    } else {
+                        ""
+                    };
+                    println!("      [{}] {}{}{}", tag, kind, check.description, approx);
+                    if !check.passed {
+                        if let Some(ce) = &check.counterexample {
+                            let bindings: Vec<_> =
+                                ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                            println!("        counterexample: {{{}}}", bindings.join(", "));
+                        }
+                    }
+                }
+                if !group_any_passed {
+                    overall = false;
+                }
+            }
+
+            let status = if result.all_passed { "PASS" } else { "FAIL" };
+            println!("    => {}\n", status);
         }
-        let status = if result.all_passed { "PASS" } else { "FAIL" };
-        println!("    => {}\n", status);
+
+        if overall {
+            println!("RESULT: all constraints satisfied.");
+        } else {
+            println!("RESULT: verification failed (see FAIL above).");
+        }
+        Ok(overall)
+    };
+
+    if !watch {
+        return run_once(json);
     }
 
-    if overall {
-        println!("RESULT: all constraints satisfied.");
-    } else {
-        println!("RESULT: verification failed (see FAIL above).");
+    // Watch mode: poll the file's mtime and re-verify on change.
+    let mut last_modified = std::fs::metadata(file).and_then(|m| m.modified()).ok();
+    let _overall = run_once(false)?;
+    eprintln!("Watching {file} for changes (Ctrl+C to stop)...");
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let current_modified = std::fs::metadata(file).and_then(|m| m.modified()).ok();
+        if current_modified != last_modified {
+            last_modified = current_modified;
+            println!("\n--- file changed, re-verifying ---\n");
+            let _ = run_once(false)?;
+        }
     }
-    Ok(overall)
 }
 
 fn make_agent(llm: bool) -> Result<Box<dyn tpt_telos_agent::CodeAgent>, String> {
@@ -401,7 +630,13 @@ fn run_transpile(file: &str, llm: bool, out: Option<String>) -> Result<(), Strin
     Ok(())
 }
 
-fn run_build(file: &str, out_dir: &str, llm: bool, solver: &str) -> Result<bool, String> {
+fn run_build(
+    file: &str,
+    out_dir: &str,
+    llm: bool,
+    solver: &str,
+    json: bool,
+) -> Result<bool, String> {
     // Configure solver backend (same logic as run_verify).
     match solver {
         "fourier-motzkin" => {}
@@ -464,20 +699,42 @@ fn run_build(file: &str, out_dir: &str, llm: bool, solver: &str) -> Result<bool,
     fs::write(crate_dir.join("telos-proof.json"), &proof_json)
         .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
 
-    println!("Generated crate written to {out_dir}/");
-    println!("Proof manifest written → {out_dir}/telos-proof.json");
-    if !all_verified {
-        println!("WARNING: some functions were not mathematically verified.");
-    }
-
     // Compile the generated crate.
-    println!("Compiling generated Rust with cargo...\n");
     let status = std::process::Command::new("cargo")
         .arg("build")
         .arg("--manifest-path")
         .arg(crate_dir.join("Cargo.toml"))
         .status();
 
+    let compile_ok = match &status {
+        Ok(s) => s.success(),
+        Err(_) => false,
+    };
+
+    if json {
+        let problems = tpt_telos_ir::extract(&modules)?;
+        let (functions, _) = collect_verify_output(&problems);
+        let output = JsonBuildOutput {
+            file: file.to_string(),
+            passed: all_verified && compile_ok,
+            out_dir: out_dir.to_string(),
+            functions,
+            proof_hash: Some(manifest.manifest_hash.clone()),
+        };
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        if !compile_ok {
+            return Err("generated Rust failed to compile".into());
+        }
+        return Ok(all_verified);
+    }
+
+    println!("Generated crate written to {out_dir}/");
+    println!("Proof manifest written → {out_dir}/telos-proof.json");
+    if !all_verified {
+        println!("WARNING: some functions were not mathematically verified.");
+    }
+
+    println!("Compiling generated Rust with cargo...\n");
     match status {
         Ok(s) if s.success() => {
             println!("\nBUILD: generated Rust compiles successfully.");
@@ -500,6 +757,7 @@ fn run_project(
     llm: bool,
     check: bool,
     strict_rt: bool,
+    json: bool,
 ) -> Result<bool, String> {
     let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     let modules = load_modules(file)?;
@@ -507,17 +765,9 @@ fn run_project(
 
     let mut outcomes = Vec::new();
     let mut all_verified = true;
-    println!("Dual-backend transpiler (agent: {})\n", agent.name());
     for m in &modules {
-        let target = tpt_telos_router::route(&m.attributes).target;
+        let _target = tpt_telos_router::route(&m.attributes).target;
         for o in transpile_module(m, agent.as_ref())? {
-            println!(
-                "  {} :: {}  [target: {}]  {}",
-                m.name,
-                o.func_name,
-                target.as_str(),
-                if o.verified { "VERIFIED" } else { "UNVERIFIED" }
-            );
             if !o.verified {
                 all_verified = false;
             }
@@ -526,15 +776,6 @@ fn run_project(
     }
 
     let project = generate_project(&modules, &outcomes);
-
-    // Surface routing diagnostics as warnings.
-    for diag in &project.diagnostics {
-        eprintln!(
-            "WARNING [{}] {}",
-            format!("{:?}", diag.kind).to_lowercase(),
-            diag.message
-        );
-    }
 
     // --strict-rt: promote routing conflicts to hard errors.
     if strict_rt {
@@ -564,6 +805,57 @@ fn run_project(
     let proof_json = proof::to_json(&manifest);
     fs::write(root.join("telos-proof.json"), &proof_json)
         .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
+
+    if json {
+        let mut ok = all_verified;
+
+        if check {
+            if project.has_rust {
+                let status = std::process::Command::new("cargo")
+                    .arg("build")
+                    .arg("--manifest-path")
+                    .arg(root.join("rust/Cargo.toml"))
+                    .status();
+                if let Ok(s) = status {
+                    if !s.success() {
+                        ok = false;
+                    }
+                } else {
+                    ok = false;
+                }
+            }
+            if project.has_go {
+                let status = std::process::Command::new("go")
+                    .arg("build")
+                    .arg("./...")
+                    .current_dir(root.join("go"))
+                    .status();
+                if let Ok(s) = status {
+                    if !s.success() {
+                        ok = false;
+                    }
+                } else {
+                    ok = false;
+                }
+            }
+        }
+
+        let problems = tpt_telos_ir::extract(&modules)?;
+        let (functions, _) = collect_verify_output(&problems);
+        let output = JsonProjectOutput {
+            file: file.to_string(),
+            passed: ok,
+            out_dir: out_dir.to_string(),
+            functions,
+            proof_hash: Some(manifest.manifest_hash.clone()),
+            has_rust: project.has_rust,
+            has_go: project.has_go,
+            has_python: project.has_python,
+            has_ffi: project.has_ffi,
+        };
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        return Ok(ok);
+    }
 
     println!("\nProject written to {out_dir}/");
     for f in &project.files {
@@ -618,9 +910,6 @@ fn run_project(
             ok = false;
         }
 
-        // `go build` skips cgo files (like the FFI bridge) when CGO is disabled
-        // or no C compiler is present, so validate all Go sources -- including
-        // the cgo `ffi.go` -- with gofmt, which parses them without a C toolchain.
         let out = std::process::Command::new("gofmt")
             .arg("-l")
             .arg(".")
@@ -655,6 +944,39 @@ fn run_project(
         println!("\nPROJECT: one or more backends failed.");
     }
     Ok(ok)
+}
+
+fn run_verify_manifest(manifest_path: &str, source_path: &str) -> Result<(), String> {
+    let manifest_json = fs::read_to_string(manifest_path)
+        .map_err(|e| format!("cannot read `{manifest_path}`: {e}"))?;
+    let source_bytes =
+        fs::read(source_path).map_err(|e| format!("cannot read `{source_path}`: {e}"))?;
+
+    let result = proof::verify_manifest(&manifest_json, &source_bytes);
+
+    if result.tampered {
+        eprintln!("MANIFEST TAMPERED");
+        if !result.source_hash_valid {
+            eprintln!(
+                "  source hash MISMATCH: expected {}, got {}",
+                result.source_hash_expected, result.source_hash_actual
+            );
+        }
+        if !result.manifest_hash_valid {
+            eprintln!(
+                "  manifest hash MISMATCH: expected {}, got {}",
+                result.manifest_hash_expected, result.manifest_hash_actual
+            );
+        }
+        return Err("manifest verification failed".into());
+    }
+
+    println!("MANIFEST OK");
+    println!("  source hash:     {}", result.source_hash_expected);
+    println!("  manifest hash:   {}", result.manifest_hash_expected);
+    println!("  source unchanged: yes");
+    println!("  manifest intact:  yes");
+    Ok(())
 }
 
 fn run_eject(

@@ -143,6 +143,88 @@ pub fn render_rust_proof_static(manifest: &ProofManifest) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Manifest verification
+// ---------------------------------------------------------------------------
+
+/// The result of verifying a proof manifest against source.
+#[derive(Debug)]
+pub struct ManifestVerification {
+    pub source_hash_valid: bool,
+    pub manifest_hash_valid: bool,
+    pub source_hash_expected: String,
+    pub source_hash_actual: String,
+    pub manifest_hash_expected: String,
+    pub manifest_hash_actual: String,
+    pub tampered: bool,
+}
+
+/// Load a manifest from its JSON string and verify it against the given source
+/// bytes. Checks both the `source_hash` (source file hasn't changed since
+/// verification) and the `manifest_hash` (manifest JSON hasn't been tampered
+/// with).
+pub fn verify_manifest(manifest_json: &str, source_bytes: &[u8]) -> ManifestVerification {
+    let source_hash_expected = format!("sha256:{}", hex_sha256(source_bytes));
+    let source_hash_from_manifest = extract_source_hash(manifest_json);
+
+    let manifest_hash_from_manifest = extract_manifest_hash(manifest_json);
+    let manifest_hash_recomputed = compute_manifest_hash_from_json(manifest_json);
+
+    let source_hash_valid = source_hash_expected == source_hash_from_manifest;
+    let manifest_hash_valid = manifest_hash_from_manifest == manifest_hash_recomputed;
+
+    ManifestVerification {
+        source_hash_valid,
+        manifest_hash_valid,
+        source_hash_expected,
+        source_hash_actual: source_hash_from_manifest,
+        manifest_hash_expected: manifest_hash_from_manifest,
+        manifest_hash_actual: manifest_hash_recomputed,
+        tampered: !source_hash_valid || !manifest_hash_valid,
+    }
+}
+
+fn extract_source_hash(json: &str) -> String {
+    let marker = "\"source_hash\": \"";
+    let Some(start) = json.find(marker) else {
+        return String::new();
+    };
+    let rest = &json[start + marker.len()..];
+    let Some(end) = rest.find('"') else {
+        return String::new();
+    };
+    rest[..end].to_string()
+}
+
+fn extract_manifest_hash(json: &str) -> String {
+    // Find "manifest_hash": "..." in the JSON.
+    let marker = "\"manifest_hash\": \"";
+    let Some(start) = json.find(marker) else {
+        return String::new();
+    };
+    let rest = &json[start + marker.len()..];
+    let Some(end) = rest.find('"') else {
+        return String::new();
+    };
+    rest[..end].to_string()
+}
+
+/// Recompute manifest_hash by blanking the field in the JSON and hashing.
+fn compute_manifest_hash_from_json(json: &str) -> String {
+    let marker = "\"manifest_hash\": \"";
+    let Some(start) = json.find(marker) else {
+        return String::new();
+    };
+    let after_key = &json[start + marker.len()..];
+    let Some(end) = after_key.find('"') else {
+        return String::new();
+    };
+    let prefix = &json[..start + marker.len()];
+    let suffix = &after_key[end..];
+    let recomputed = format!("{prefix}{suffix}");
+    format!("sha256:{}", hex_sha256(recomputed.as_bytes()))
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -317,6 +399,47 @@ mod tests {
         assert!(
             s.contains("TELOS_PROOF_MANIFEST"),
             "missing static name: {s}"
+        );
+    }
+
+    #[test]
+    fn verify_manifest_passes_for_intact_source() {
+        let m = generate_manifest(b"module M {}", &[]);
+        let json = to_json(&m);
+        let result = verify_manifest(&json, b"module M {}");
+        assert!(result.source_hash_valid, "source hash should match");
+        assert!(result.manifest_hash_valid, "manifest hash should match");
+        assert!(!result.tampered, "should not be flagged as tampered");
+    }
+
+    #[test]
+    fn verify_manifest_detects_source_drift() {
+        let m = generate_manifest(b"module M {}", &[]);
+        let json = to_json(&m);
+        let result = verify_manifest(&json, b"module M { changed }");
+        assert!(!result.source_hash_valid, "source hash should mismatch");
+        assert!(result.tampered, "should be flagged as tampered");
+    }
+
+    #[test]
+    fn verify_manifest_detects_json_tampering() {
+        let m = generate_manifest(b"module M {}", &[]);
+        let mut json = to_json(&m);
+        // Tamper with the schema_version field.
+        json = json.replace("\"1\"", "\"99\"");
+        let result = verify_manifest(&json, b"module M {}");
+        assert!(!result.manifest_hash_valid, "manifest hash should mismatch");
+        assert!(result.tampered, "should be flagged as tampered");
+    }
+
+    #[test]
+    fn compute_hash_matches_generate() {
+        let m = generate_manifest(b"module M {}", &[]);
+        let json = to_json(&m);
+        let recomputed = compute_manifest_hash_from_json(&json);
+        assert_eq!(
+            m.manifest_hash, recomputed,
+            "recomputed hash should match original"
         );
     }
 }

@@ -12,9 +12,17 @@ Part of the [tpt-telos](https://github.com/tpt-solutions/tpt-telos) compiler wor
 - **`generate_program`** — emits a single self-contained Rust library file (structs, invariant
   `impl` methods, contract doc-comments, one `fn` per function).
 - **`generate_project`** — assembles a full dual-backend project tree: a Rust crate, a Go module,
-  and a C-ABI FFI bridge between them, with each module routed to Rust or Go by `tpt-telos-router`.
-- **eject hatch** — functions marked `@eject` are compiled to a trusted opaque `f_impl` stub wrapped
-  by a generated guard that enforces `requires`/`ensures` at runtime via `assert!`.
+  and a C-ABI FFI bridge between them, with each module routed to Rust, Go, or Python by
+  `tpt-telos-router`.
+- **`python` module** — emits a Python backend for `@boundary(ml_training|python|jax)` modules:
+  `@dataclass` structs with `satisfies_invariants()` and runtime `assert` guards for every contract;
+  the `jax` flag additionally annotates fields with `jnp.int64`.
+- **`proof` module** — generates `telos-proof.json` on every `build`/`project` run (SHA-256 of the
+  source, per-function verification outcomes, a tamper-evident `manifest_hash`) and embeds it as
+  `#[used] static TELOS_PROOF_MANIFEST` in the generated Rust binary; `verify_manifest` re-hashes a
+  source file against a saved manifest to detect drift (`telos verify-manifest`).
+- **eject hatch** — functions marked `@eject` are compiled to a trusted opaque `f_impl`/`fImpl` stub
+  wrapped by a generated guard that enforces `requires`/`ensures` at runtime via `assert!`/`panic`.
 
 ## Usage
 
@@ -39,11 +47,13 @@ for file in &project.files {
 | Item | Description |
 |------|-------------|
 | `generate_program(modules, outcomes) -> String` | Single Rust library source |
-| `generate_project(modules, outcomes) -> Project` | Full Rust+Go project tree |
+| `generate_project(modules, outcomes) -> Project` | Full Rust+Go(+Python) project tree |
 | `Project` | Collection of `GeneratedFile { path, contents }` |
-| `eject::render_rust_ejected` | Opaque stub + contract-guarded wrapper |
+| `eject` module | Renders `@eject` functions as an opaque stub + contract-guarded wrapper (invoked automatically by `generate_program`/`generate_project`, not a public entry point) |
 | `go` module | Go backend emitter |
+| `python` module | Python/JAX backend emitter |
 | `ffi` module | C-ABI FFI bridge generator |
+| `proof::generate_manifest` / `proof::verify_manifest` | Cryptographic proof manifest write/verify |
 
 ## License
 

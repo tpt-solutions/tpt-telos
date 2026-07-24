@@ -9,8 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/tpt-telos-parser"
-keywords.workspace = true
-categories.workspace = true
+keywords = ["parser", "lexer", "ast", "grammar", "telos"]
+categories = ["parser-implementations", "compilers"]
 description = "Lexer, parser and AST for the tpt-telos language"
 
 [dependencies]

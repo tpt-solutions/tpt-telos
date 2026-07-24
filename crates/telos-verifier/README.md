@@ -14,7 +14,13 @@ solver.
 Given a `VerificationProblem` from `tpt-telos-ir`, `verify` checks every `ensures` clause and
 invariant. On failure it extracts a concrete counter-example `Model` — a variable assignment that
 satisfies the premises but violates the conclusion — which the agent in `tpt-telos-agent` uses to
-drive the rewrite step.
+drive the rewrite step, and which the CLI/LSP now print directly.
+
+Behind the `z3` cargo feature, `set_solver_backend(SolverBackend::Z3)` routes verification through
+Z3 instead of Fourier–Motzkin, for exact nonlinear arithmetic that interval bounding can't decide;
+without the feature (or without Z3 on `PATH`), it falls back to the built-in solver. A `cluster`
+module also supports gRPC-based dispatch of `VerificationProblem`s to a pool of solver workers for
+CI-scale verification.
 
 ## Usage
 
@@ -46,8 +52,10 @@ for problem in &problems {
 | `entails(premises, conclusion) -> bool` | Core Fourier–Motzkin entailment check |
 | `counterexample(premises, conclusion) -> Option<Model>` | Concrete failing assignment |
 | `VerificationResult` | `func_name`, `checks`, `all_passed` |
-| `CheckResult` | `description`, `passed`, `is_ensures` |
+| `CheckResult` | `description`, `passed`, `is_ensures`, `is_approximation`, `counterexample`, `or_group` |
 | `Model` | Map of variable name → rational value |
+| `set_solver_backend(SolverBackend)` / `solver_backend()` | Select Fourier–Motzkin (default) or Z3 (`z3` feature) |
+| `cluster` module | gRPC dispatch of `VerificationProblem`s to a solver-worker pool |
 
 ## License
 
