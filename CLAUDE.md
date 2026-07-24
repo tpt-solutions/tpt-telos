@@ -26,21 +26,32 @@ cargo clippy --workspace --all-targets -- -D warnings   # CI lint check (matches
 cargo llvm-cov --workspace --fail-under-lines 75         # CI coverage gate (75% floor; don't lower it)
 ```
 
-Running the compiled CLI directly (subcommands: `parse | verify | transpile | build | project | eject | lsp`):
+Running the compiled CLI directly (subcommands: `init | parse | verify | transpile | build | project
+| eject | verify-manifest | lsp`):
 
 ```
+cargo run -p tpt-telos -- init --module MyModule --out my_module.telos
 cargo run -p tpt-telos -- verify examples/wallet.telos
+cargo run -p tpt-telos -- verify examples/wallet.telos --json      # machine-readable output for CI/editors
+cargo run -p tpt-telos -- verify examples/wallet.telos --watch     # poll the file and re-verify on change
+cargo run -p tpt-telos -- verify examples/wallet.telos --solver z3 # requires --features z3 + Z3 on PATH
 cargo run -p tpt-telos -- build examples/wallet.telos --out-dir gen
 cargo run -p tpt-telos -- project examples/microservice.telos --out-dir gen-project --check
+cargo run -p tpt-telos -- project examples/microservice.telos --check --strict-rt  # non-zero exit on real_time/Go conflict
 cargo run -p tpt-telos -- eject examples/eject.telos --func withdraw
+cargo run -p tpt-telos -- verify-manifest gen/telos-proof.json examples/wallet.telos  # detect source drift
 cargo run -p tpt-telos -- transpile examples/wallet.telos --llm   # requires --features llm and TELAS_LLM_* env vars
 ```
 
 `telos project --check` shells out to `cargo` and `go`; `eject`/`project` also invoke `gofmt` to
 canonicalize generated Go (falls back to a warning, not a failure, if `gofmt`/`go` aren't on PATH).
+`build`/`project` also write a `telos-proof.json` manifest (SHA-256 of source + per-function
+verification outcomes + tamper-evident `manifest_hash`); `verify-manifest` re-hashes source against
+a saved manifest to detect drift.
 
-CI (`.github/workflows/ci.yml`) runs two jobs: format+clippy+test, and a separate `cargo-llvm-cov`
-coverage job with an enforced 75% line-coverage floor.
+CI (`.github/workflows/ci.yml`) runs three jobs: format+clippy+test, a `feature-matrix` job building/
+testing/linting `--features llm` and `--features z3` separately, and a `cargo-llvm-cov` coverage job
+with an enforced 75% line-coverage floor.
 
 ## Workspace layout
 
@@ -49,32 +60,49 @@ Eight crates under `crates/`, each with a focused responsibility in the pipeline
 - **tpt-telos-parser** — hand-written lexer/parser/AST for `.telos` source. Grammar is the source of truth
   at `crates/telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
   the language changes. The AST also covers generics, tuples, `struct`/`enum` definitions, calls,
-  and control-flow expressions (`if`/`match`/`forall`/aggregates/`?`) — see the caveat below: this
-  parses today, but `tpt-telos-ir`/`tpt-telos-codegen` lowering of it is a work-in-progress tracked as
-  Phase 7 in `TODO.md`, not a finished feature.
+  and control-flow expressions (`if`/`match`/`forall`/aggregates/`?`) — as of Phase 7 these are fully
+  lowered by `tpt-telos-ir`/`tpt-telos-codegen` too, not just parsed (see Phase 7 in `TODO.md`).
 - **tpt-telos-ir** (`extract.rs`) — lowers the AST into `VerificationProblem`s, translating `requires`/
-  `ensures`/invariants into a linear-arithmetic constraint model (QF_LRA-ish).
+  `ensures`/invariants into a linear-arithmetic constraint model (QF_LRA-ish). Also handles disjunction
+  (`requires a || b`) via DNF expansion into independent branches, bounded `forall`/aggregate unrolling
+  over constant-bound ranges, general nested `if`/`match` as arithmetic sub-expressions, modular
+  (Dafny-style) verification of `Call`/`MethodCall` by substituting callee `ensures` as premises
+  (rejecting recursive call cycles), and constant-index array/slice access. Runs a cross-module type
+  resolution pass first, so one module's invariant types can appear in another's function signatures.
 - **tpt-telos-verifier** (`solver.rs`, `verify.rs`) — a self-contained Fourier-Motzkin-based SMT-style
-  solver (no external Z3/CVC5 dependency). Sound over integers. Produces pass/fail plus, on failure, a
-  concrete counter-example `Model` used to drive agent rewrites.
+  solver (no external Z3/CVC5 dependency required). Sound over integers. Produces pass/fail plus, on
+  failure, a concrete counter-example `Model` used to drive agent rewrites and surfaced by the CLI/LSP.
+  Behind the `z3` feature, `set_solver_backend(SolverBackend::Z3)` routes verification through Z3
+  instead for exact nonlinear arithmetic; `cluster.rs` supports gRPC dispatch of `VerificationProblem`s
+  to a pool of solver workers for CI-scale verification.
 - **tpt-telos-router** — pure classification: reads `@boundary(...)` attributes and decides `Target::Rust`
-  vs `Target::Go` per module/function (`cpu_bound`/`zero_allocation`/`crypto`/`real_time` -> Rust;
-  `network_io`/`high_concurrency`/`distributed`/`high_latency` -> Go).
+  vs `Target::Go` vs `Target::Python` per module/function (`cpu_bound`/`zero_allocation`/`crypto`/
+  `real_time` -> Rust; `network_io`/`high_concurrency`/`distributed`/`high_latency` -> Go;
+  `ml_training`/`python`/`jax` -> Python, which beats everything else). Also reads `@state(persistent|
+  ephemeral)` into a `StorageClass`, and `route_checked` emits a `RoutingDiagnostic` (`real_time`/
+  `zero_allocation` routed to Go's non-deterministic GC) that the CLI's `--strict-rt` turns into a
+  non-zero exit.
 - **tpt-telos-agent** — the `CodeAgent` trait plus the Generate -> Verify -> Counter-example -> Rewrite
   loop (`transpile_module`). `StaticAgent` (`static_agent.rs`) is the default, fully offline,
   deterministic synthesizer (translates the developer's body when present, else derives one from
-  `ensures`). `llm_agent.rs` (behind the `llm` Cargo feature) calls a real LLM over an
-  OpenAI-compatible or native Anthropic wire format — see env vars below.
+  `ensures`, including case-split `if`/`match`, bounded loops, and direct calls). `llm_agent.rs`
+  (behind the `llm` Cargo feature) calls a real LLM over an OpenAI-compatible or native Anthropic wire
+  format — see env vars below; its `pretty`/`pretty_stmt` AST pretty-printers must stay exhaustive over
+  every `Expr`/`Stmt` variant or `--features llm` fails to compile under `-D warnings`.
 - **tpt-telos-codegen** — lowers verified `Candidate`s into target source: `lib.rs`/`eject.rs` for the Rust
   backend (structs, invariant `impl` methods, contracts as doc comments), `go.rs` for the Go backend
-  (mirrors the Rust one), `ffi.rs` for the bidirectional C-ABI FFI bridge between them, and
-  `project.rs` to assemble a full buildable project tree (`Cargo.toml` + `go.mod` + FFI glue) routed
-  per-module via `tpt-telos-router`.
+  (mirrors the Rust one), `python.rs` for `@boundary(ml_training|python|jax)` modules (`@dataclass`
+  structs + runtime `assert` guards, `jnp.int64` annotations under `jax`), `ffi.rs` for the
+  bidirectional C-ABI FFI bridge between Rust and Go, `proof.rs` for the `telos-proof.json` manifest
+  (generate + verify), and `project.rs` to assemble a full buildable project tree (`Cargo.toml` +
+  `go.mod` + FFI glue) routed per-module via `tpt-telos-router`.
 - **tpt-telos-lsp** — dependency-light JSON-RPC 2.0 LSP server over stdio (`Content-Length` framing):
-  diagnostics, hover, and custom `telos/verify` / `telos/eject` requests. Message handling
-  (`analysis.rs`) is decoupled from stdio I/O for unit testing.
+  diagnostics (with counterexamples), hover, `textDocument/codeAction` (quick-fix `requires !(...)`
+  suggestions derived from a failing check's counterexample), and custom `telos/verify` / `telos/eject`
+  requests. Message handling (`analysis.rs`) is decoupled from stdio I/O for unit testing.
 - **tpt-telos** — the `telos` binary (clap). Thin orchestration layer over the crates above; also
-  contains the AST pretty-printer used by `telos parse`.
+  contains the AST pretty-printer used by `telos parse` and the `init` scaffold / `verify-manifest`
+  drift-check commands.
 
 ### Pipeline data flow
 
@@ -94,20 +122,18 @@ optional `cargo build` / `go build` / `gofmt` invocation by the CLI.
 - No implicit type coercion, no hidden allocation — every operation is explicitly named (by design,
   to keep the language easy for both humans and the LLM agent to reason about).
 
-### Known gaps (do not assume these work without checking; tracked in `TODO.md` Phase 7)
+### Known gaps (do not assume these work without checking; Phase 7 and 8 are both complete per `TODO.md`)
 
-- `telos verify` does not yet print a counterexample on `FAIL` — only the restated clause text
-  (the verifier already computes one internally via `telos_verifier::solver::counterexample`, used by
-  the agent's rewrite loop, but `CheckResult`/CLI/LSP output don't surface it yet).
-- `struct`/`enum` definitions parse but are not yet consumed by `telos-ir::extract` or driven into
-  codegen's emitted field types (codegen still infers fields from usage and hardcodes `i64`).
-- Contract expressions using `Call`/`MethodCall`/`Index`/`If`/`Match`/`Forall`/`Aggregate` are rejected
-  by `telos-ir::extract`'s `linearize`/`linearize_bounded` with one generic error today; full/partial
-  lowering for these is planned, not implemented.
-- The `--solver z3` CLI flag (behind the `z3` feature) sets a global `SolverBackend` that
-  `telos-verifier::verify`/`unsat` never actually reads — it is currently a no-op, not a working
-  alternate backend, despite `TODO.md`'s Phase 6 marking it `[x]` complete. Don't trust a Phase
-  `[x]` mark alone; spot-check against the code.
+- The LSP's `textDocument/codeAction` quick-fix only ever suggests excluding the exact counterexample
+  witness (`requires !(v1 == a && v2 == b && ...)`) — it's a starting point for the developer to
+  refine, not a guaranteed or general fix.
+- `--features z3` requires Z3's headers/library available at build time (`z3-sys`'s build script
+  needs `z3.h` on the include path); it is not vendored, so this feature will fail to build on a
+  machine without Z3 installed even though the default feature set is unaffected.
+- Non-constant/symbolic array and slice indices are still rejected in contracts (only compile-time-
+  constant indices are unrolled); full array theory remains out of scope.
+- `TODO.md`'s Phase `[x]` marks have been spot-checked once (see its "Re-audit Phase 6's `[x]` claims"
+  entry) but treat any *new* `[x]` mark with the same skepticism until verified against the code.
 
 ### LLM agent environment variables (only relevant behind the `llm` feature)
 
