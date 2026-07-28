@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-telos"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "serde",
@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-telos-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "tpt-telos-ir",
@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-telos-codegen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sha2",
  "tpt-telos-agent",
@@ -992,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-telos-ir"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proptest",
  "tpt-telos-parser",
@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-telos-lsp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1014,21 +1014,21 @@ dependencies = [
 
 [[package]]
 name = "tpt-telos-parser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "tpt-telos-router"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-telos-parser",
 ]
 
 [[package]]
 name = "tpt-telos-verifier"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proptest",
  "tpt-telos-ir",
