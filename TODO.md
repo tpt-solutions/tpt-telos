@@ -260,3 +260,78 @@ Phase 7 additions:
   that excludes the concrete witness the solver found (a starting point, not a guaranteed
   fix), advertised via `codeActionProvider: true`. (`crates/telos-lsp/src/analysis.rs`,
   `crates/telos-lsp/src/lib.rs`)
+
+## Phase 9: Platform Review Backlog
+
+> Findings from a full-platform review (bugs, docs, usability, adoption). Architecture decision:
+> stay with the self-contained FM solver / flat `crates/` workspace rather than expanding toward
+> spec.txt's Z3/CVC5-primary, Kani/Prusti, LangGraph/vLLM, sibling-repo-integrated design — see
+> rationale below. None of the items in this phase are implemented yet.
+
+### Soundness & correctness bugs
+- [ ] **Fix `if`/`else` contract lowering unsoundness** — `to_constraints_dnf` accepts the `else`
+  branch unconditionally instead of guarding it with `!cond`, so a function that always executes
+  `else` can verify even when `cond` was true and `then` should have applied.
+  (`crates/telos-ir/src/extract.rs`, `Expr::If` arm)
+- [ ] **Fix `match` contract lowering unsoundness** — same issue: each arm becomes an independent
+  DNF branch with no premise tying it to the scrutinee matching that pattern.
+  (`crates/telos-ir/src/extract.rs`, `Expr::Match` arm)
+- [ ] **Fix nonlinear-bounding max-corner bug** — `linearize_bounded` always substitutes the
+  single max corner value regardless of whether the surrounding relation needs an upper or lower
+  bound, which can prove false facts or reject true ones depending on direction.
+  (`crates/telos-ir/src/extract.rs`, `linearize_bounded`)
+- [ ] **Reject non-integer types at FFI boundaries** — `ffi.rs` hardcodes every scalar/field to
+  `int64_t`/`i64`; floats/strings/bools/arrays/nested structs crossing an FFI-routed boundary are
+  silently coerced instead of rejected with a clear error. (`crates/telos-codegen/src/ffi.rs`)
+- [ ] **Diagnose `real_time`/`zero_allocation` routed to Python** — `RoutingDiagnostic` only
+  checks Go-target conflicts; a module tagged `@boundary(real_time, ml_training)` silently routes
+  to Python (GC + interpreter) with no warning. (`crates/telos-router/src/lib.rs`)
+- [ ] **Warn on unrecognized `@state(...)` values** — typos like `@state(persistant)` silently
+  fall back to `Ephemeral` with no diagnostic. (`crates/telos-router/src/lib.rs`)
+- [ ] **`StaticAgent`: handle inequality-only `ensures`** — currently only `==`, `if`/`match`
+  splits, and direct calls synthesize a body; a pure inequality postcondition (e.g.
+  `ensures balance >= 0`) silently produces an empty body instead of a reasonable first attempt.
+  (`crates/telos-agent/src/static_agent.rs`)
+- [ ] **`eject --func <name>`: error on unmatched function name** — if the requested name doesn't
+  exist but a different function has `@eject`, that other function is silently ejected instead of
+  reporting "function not found." (`crates/telos-cli/src/main.rs`)
+
+### Documentation integrity
+- [ ] Fix Phase 8's intro line (says most items are "proposed follow-ups, not yet implemented"
+  while every item below is checked `[x]`) — resolve the inconsistency one way or the other.
+- [ ] Remove stray duplicate `TODO 126071x.md`-style files at repo root if confirmed to be
+  accidental artifacts.
+- [ ] Add `examples/README.md` indexing all 12 `.telos` fixtures (one line each: what it
+  demonstrates), since several fixture comments (`float.telos`, `array_test.telos`) qualify
+  claims made in Phase 6 that aren't visible from TODO.md alone.
+- [ ] Cross-link root README to the 8 crate-level READMEs; add a troubleshooting section
+  covering missing `gofmt`/`go`/Z3 on PATH (currently only documented in CLAUDE.md).
+- [ ] Add a short note to the root README on how the implemented architecture diverges from
+  spec.txt's aspirational layout/tech stack, and why (see Phase 9 rationale above).
+
+### CLI & automation UX
+- [ ] Make `--json` available on `telos eject`/`parse` (currently only on `verify`/`build`/`project`).
+- [ ] Add colorized/rustc-style diagnostic output (caret/underline source spans) to CLI errors.
+- [ ] Extend `--watch` beyond `verify` (currently naive single-file mtime poll, no debounce) to
+  `build`/`project`, and add debouncing + directory-wide watching.
+- [ ] Add shell-completion generation (`clap_complete`) via a `telos completions` subcommand.
+- [ ] Add `telos init --template <name>` with 2-3 starter templates (simple invariant, dual-backend
+  FFI, eject) instead of one hardcoded Counter module.
+- [ ] Surface the FM solver's documented integer-incompleteness in `verify` failure output, hinting
+  that some failures may be solver limitations rather than genuine spec violations.
+
+### Editor integration (highest-leverage adoption gap)
+- [ ] Build a minimal VS Code extension: syntax highlighting (TextMate or tree-sitter grammar) +
+  LSP client wiring against the existing `telos lsp` server (no new server-side work required).
+- [ ] Extend the LSP server: `textDocument/formatting` (reuse the existing pretty-printer — cheapest
+  addition), then `textDocument/definition`/`references` (needs a workspace-wide symbol index),
+  then `textDocument/completion`. (`crates/telos-lsp`)
+
+### Release & contribution infra
+- [ ] Add ARM64/musl targets to the release build matrix (`.github/workflows/release.yml`).
+- [ ] Add a Dockerfile and/or devcontainer.json for reproducible dev setup.
+- [ ] Add `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/`/PR template.
+
+### Innovation
+- [ ] Prototype a WASM build of `telos-parser` + `telos-verifier` (both dependency-light; default
+  solver path needs no external Z3) for a browser-based playground — zero-install trial for new users.
