@@ -320,17 +320,22 @@ Phase 7 additions:
   that some failures may be solver limitations rather than genuine spec violations.
 
 ### Editor integration (highest-leverage adoption gap)
-- [ ] Build a minimal VS Code extension: syntax highlighting (TextMate or tree-sitter grammar) +
-  LSP client wiring against the existing `telos lsp` server (no new server-side work required).
-- [ ] Extend the LSP server: `textDocument/formatting` (reuse the existing pretty-printer — cheapest
-  addition), then `textDocument/definition`/`references` (needs a workspace-wide symbol index),
-  then `textDocument/completion`. (`crates/telos-lsp`)
+- [x] Build a minimal VS Code extension: syntax highlighting (TextMate grammar) + LSP client wiring
+  (`vscode-languageclient`) against the existing `telos lsp` server. (`vscode-telos/`)
+- [x] Extend the LSP server: `textDocument/formatting` (reuse the existing pretty-printer).
+  (`crates/telos-lsp/src/lib.rs`) `textDocument/definition`/`references` and `textDocument/completion`
+  remain open (need a workspace-wide symbol index).
 
 ### Release & contribution infra
-- [ ] Add ARM64/musl targets to the release build matrix (`.github/workflows/release.yml`).
-- [ ] Add a Dockerfile and/or devcontainer.json for reproducible dev setup.
-- [ ] Add `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/`/PR template.
+- [x] Add ARM64/musl targets to the release build matrix
+  (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`) and a Dockerfile.
+  (`.github/workflows/release.yml`, `Dockerfile`)
+- [x] Add a Dockerfile and/or devcontainer.json for reproducible dev setup. (`Dockerfile`, `.devcontainer/devcontainer.json`)
+- [x] Add `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/`/PR template.
+  (`CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`,
+  `.github/pull_request_template.md`)
 
 ### Innovation
-- [ ] Prototype a WASM build of `telos-parser` + `telos-verifier` (both dependency-light; default
+- [x] Prototype a WASM build of `telos-parser` + `telos-verifier` (both dependency-light; default
   solver path needs no external Z3) for a browser-based playground — zero-install trial for new users.
+  (`crates/telos-wasm/`)
