@@ -505,3 +505,308 @@ fn pretty_expr(e: &Expr) -> String {
         Expr::Range { lo, hi } => format!("{}..{}", pretty_expr(lo), pretty_expr(hi)),
     }
 }
+
+// ---------------------------------------------------------------- formatter
+
+/// Parse `text` and render it back as canonically-formatted telos source.
+///
+/// Returns `Err` if the source cannot be parsed (parse errors are surfaced by
+/// diagnostics, so callers typically return an empty edit list on failure).
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_lsp::analysis::format_source;
+///
+/// let src = "module M { func noop(w: Wallet) ; }";
+/// let formatted = format_source(src).unwrap();
+/// assert!(formatted.contains("module M"));
+/// assert!(formatted.contains("func noop"));
+/// ```
+pub fn format_source(text: &str) -> Result<String, String> {
+    let modules = parse(text)?;
+    let rendered: Vec<String> = modules.iter().map(render_module).collect();
+    let mut out = rendered.join("\n\n");
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn render_module(m: &Module) -> String {
+    let attrs: Vec<String> = m
+        .attributes
+        .iter()
+        .map(|a| {
+            if a.args.is_empty() {
+                format!("@{}", a.name)
+            } else {
+                let args = a
+                    .args
+                    .iter()
+                    .map(|arg| match arg {
+                        Arg::Flag(f) => f.clone(),
+                        Arg::Kv(k, v) => format!("{}={}", k, render_literal(v)),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("@{}({})", a.name, args)
+            }
+        })
+        .collect();
+    let header = if attrs.is_empty() {
+        format!("module {} ", m.name)
+    } else {
+        format!("{}\nmodule {} ", attrs.join("\n"), m.name)
+    };
+    let items = m
+        .items
+        .iter()
+        .map(render_item)
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    format!("{}{{\n{}\n}}", header, fmt_indent(&items))
+}
+
+fn render_item(item: &Item) -> String {
+    match item {
+        Item::Invariant(i) => render_invariant(i),
+        Item::Func(f) => render_func(f),
+        Item::Struct(s) => {
+            let fields: Vec<_> = s
+                .fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, render_type(&f.ty)))
+                .collect();
+            format!("struct {} {{\n{}\n}}", s.name, fmt_indent(&fields.join(",\n")))
+        }
+        Item::Enum(e) => {
+            let variants: Vec<_> = e
+                .variants
+                .iter()
+                .map(|v| {
+                    if v.fields.is_empty() {
+                        v.name.clone()
+                    } else {
+                        let fields: Vec<_> = v
+                            .fields
+                            .iter()
+                            .map(|f| format!("{}: {}", f.name, render_type(&f.ty)))
+                            .collect();
+                        format!("{} {{\n{}\n}}", v.name, fmt_indent(&fields.join(",\n")))
+                    }
+                })
+                .collect();
+            format!("enum {} {{\n{}\n}}", e.name, fmt_indent(&variants.join(",\n")))
+        }
+    }
+}
+
+fn render_invariant(i: &Invariant) -> String {
+    let body = i
+        .constraints
+        .iter()
+        .map(pretty_expr)
+        .collect::<Vec<_>>()
+        .join(";\n");
+    format!("invariant {} {{\n{}\n}}", i.name, fmt_indent(&body))
+}
+
+fn render_func(f: &Func) -> String {
+    let attrs: Vec<String> = f
+        .attributes
+        .iter()
+        .map(|a| {
+            if a.args.is_empty() {
+                format!("@{}", a.name)
+            } else {
+                let args = a
+                    .args
+                    .iter()
+                    .map(|arg| match arg {
+                        Arg::Flag(fl) => fl.clone(),
+                        Arg::Kv(k, v) => format!("{}={}", k, render_literal(v)),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("@{}({})", a.name, args)
+            }
+        })
+        .collect();
+    let params = f
+        .params
+        .iter()
+        .map(|p| {
+            let mut_prefix = if p.mutability == ParamMutability::Mutable {
+                "mut "
+            } else {
+                ""
+            };
+            format!("{}{}: {}", mut_prefix, p.name, render_type(&p.ty))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret = f
+        .return_ty
+        .as_ref()
+        .map(|t| format!(" -> {}", render_type(t)))
+        .unwrap_or_default();
+    let clauses: Vec<String> = f
+        .requires
+        .iter()
+        .map(|e| format!("requires {}", pretty_expr(e)))
+        .chain(
+            f.ensures
+                .iter()
+                .map(|e| format!("ensures {}", pretty_expr(e))),
+        )
+        .collect();
+    let body = f
+        .body
+        .iter()
+        .map(render_stmt)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut out = String::new();
+    if !attrs.is_empty() {
+        out.push_str(&attrs.join("\n"));
+        out.push('\n');
+    }
+    out.push_str(&format!("func {}({}){}", f.name, params, ret));
+    if !clauses.is_empty() {
+        out.push('\n');
+        out.push_str(&fmt_indent(&clauses.join("\n")));
+    }
+    if f.elided {
+        out.push(';');
+    } else {
+        out.push_str("\n{\n");
+        out.push_str(&fmt_indent(&body));
+        out.push_str("\n}");
+    }
+    out
+}
+
+fn render_stmt(s: &Stmt) -> String {
+    match s {
+        Stmt::MutateState(assigns) => {
+            let inner = assigns
+                .iter()
+                .map(render_assign)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("mutate state {{\n{}\n}}", fmt_indent(&inner))
+        }
+        Stmt::Assign(a) => render_assign(a),
+        Stmt::Let(lb) => {
+            let ty = lb
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", render_type(t)))
+                .unwrap_or_default();
+            format!("let {}{} = {};", lb.name, ty, pretty_expr(&lb.value))
+        }
+        Stmt::If(is) => {
+            let mut out = format!("if {} {{\n", pretty_expr(&is.condition));
+            let then: Vec<_> = is.then_body.iter().map(render_stmt).collect();
+            out.push_str(&fmt_indent(&then.join("\n")));
+            out.push_str("\n}");
+            if let Some(else_body) = &is.else_body {
+                let els: Vec<_> = else_body.iter().map(render_stmt).collect();
+                out.push_str(" else {\n");
+                out.push_str(&fmt_indent(&els.join("\n")));
+                out.push_str("\n}");
+            }
+            out
+        }
+        Stmt::Match(ms) => {
+            let arms: Vec<_> = ms
+                .arms
+                .iter()
+                .map(|a| {
+                    let body: Vec<_> = a.body.iter().map(render_stmt).collect();
+                    format!(
+                        "{} => {{\n{}\n}}",
+                        render_pattern(&a.pattern),
+                        fmt_indent(&body.join("\n"))
+                    )
+                })
+                .collect();
+            format!(
+                "match {} {{\n{}\n}}",
+                pretty_expr(&ms.scrutinee),
+                fmt_indent(&arms.join("\n"))
+            )
+        }
+        Stmt::Return(e) => match e {
+            Some(expr) => format!("return {};", pretty_expr(expr)),
+            None => "return;".to_string(),
+        },
+    }
+}
+
+fn render_assign(a: &Assign) -> String {
+    let op = match a.op {
+        AssignOp::Set => "=",
+        AssignOp::Add => "+=",
+        AssignOp::Sub => "-=",
+    };
+    format!(
+        "{} {} {};",
+        pretty_expr(&a.target),
+        op,
+        pretty_expr(&a.value)
+    )
+}
+
+fn render_type(t: &Type) -> String {
+    match t {
+        Type::Named(s) => s.clone(),
+        Type::Generic(name, args) => {
+            let args: Vec<_> = args.iter().map(render_type).collect();
+            format!("{}<{}>", name, args.join(", "))
+        }
+        Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(render_type).collect();
+            format!("({})", elems.join(", "))
+        }
+        Type::Array(elem, len) => format!("[{}; {}]", render_type(elem), len),
+        Type::Slice(elem) => format!("[{}]", render_type(elem)),
+    }
+}
+
+fn render_literal(l: &Literal) -> String {
+    match l {
+        Literal::Int(n) => n.to_string(),
+        Literal::Ident(s) => s.clone(),
+    }
+}
+
+fn render_pattern(p: &Pattern) -> String {
+    match p {
+        Pattern::Literal(n) => n.to_string(),
+        Pattern::Var(v) => v.clone(),
+        Pattern::Constructor(name, fields) => {
+            if fields.is_empty() {
+                name.clone()
+            } else {
+                let fields: Vec<_> = fields.iter().map(render_pattern).collect();
+                format!("{}({})", name, fields.join(", "))
+            }
+        }
+        Pattern::Wildcard => "_".to_string(),
+    }
+}
+
+fn fmt_indent(s: &str) -> String {
+    s.lines()
+        .map(|line| {
+            if line.is_empty() {
+                line.to_string()
+            } else {
+                format!("    {}", line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}

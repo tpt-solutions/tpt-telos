@@ -19,7 +19,9 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
-pub use analysis::{analyze, code_actions, diagnostics, hover_markdown, Diagnostic, QuickFix};
+pub use analysis::{
+    analyze, code_actions, diagnostics, format_source, hover_markdown, Diagnostic, QuickFix,
+};
 
 /// The language server state: open documents and lifecycle flags.
 pub struct Server {
@@ -119,7 +121,8 @@ impl Server {
                     "capabilities": {
                         "textDocumentSync": 1,
                         "hoverProvider": true,
-                        "codeActionProvider": true
+                        "codeActionProvider": true,
+                        "documentFormattingProvider": true
                     },
                     "serverInfo": { "name": "telos-lsp", "version": env!("CARGO_PKG_VERSION") }
                 }),
@@ -216,6 +219,33 @@ impl Server {
                     })
                     .collect();
                 vec![response(id, json!(actions))]
+            }
+            "textDocument/formatting" => {
+                let uri = msg["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let result = match self.documents.get(&uri) {
+                    Some(text) => match format_source(text) {
+                        Ok(formatted) => {
+                            let line_count = text.lines().count();
+                            let last_line_len = text.lines().last().map(|l| l.len()).unwrap_or(0);
+                            json!([{
+                                "range": {
+                                    "start": { "line": 0, "character": 0 },
+                                    "end": {
+                                        "line": line_count,
+                                        "character": last_line_len
+                                    }
+                                },
+                                "newText": formatted
+                            }])
+                        }
+                        Err(_) => json!([]),
+                    },
+                    None => json!([]),
+                };
+                vec![response(id, result)]
             }
             "telos/verify" => {
                 let uri = msg["params"]["uri"].as_str().unwrap_or("");
