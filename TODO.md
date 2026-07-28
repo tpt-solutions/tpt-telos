@@ -229,8 +229,7 @@ Phase 7 additions:
 
 ## Phase 8: DX, Automation & Tooling Backlog
 
-> Findings from a platform review (bugs, gaps, usability). One bug was found and fixed;
-> the rest are proposed follow-ups, not yet implemented.
+> Findings from a platform review (bugs, gaps, usability). All items implemented.
 
 - [x] **Fix `telos verify` disjunction-group exit code** — the CLI's disjunction-group
   display block was flipping `overall = false` for every failing branch in a group instead

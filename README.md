@@ -100,6 +100,58 @@ At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
 | `tpt-telos-codegen` | Rust/Go/Python backends, FFI bridge, eject, project assembly, cryptographic proof manifest. |
 | `tpt-telos-lsp`     | JSON-RPC 2.0 language server over stdio (diagnostics, hover, quick-fix code actions, `telos/verify`, `telos/eject`). |
 
+## Architecture note: divergence from spec.txt
+
+`spec.txt` sketched an aspirational directory layout with top-level `compiler/`,
+`verifier/`, and `ai-orchestrator/` sibling directories, and assumed Z3/CVC5 as the
+primary solver, a LangGraph-style orchestration layer, and vLLM for local inference.
+
+What was built instead is a flat **Cargo workspace** under `crates/` with eight
+focused crates (parser, ir, verifier, router, agent, codegen, lsp, cli). The reasons:
+
+- A single workspace makes cross-crate refactoring, CI, and coverage tooling
+  straightforward with standard Cargo tooling and no per-directory build wiring.
+- The self-contained Fourier–Motzkin solver eliminates the Z3 C-library build
+  dependency for the common case; Z3 is available behind `--features z3` for
+  exact nonlinear arithmetic when needed.
+- `StaticAgent` (fully offline, deterministic synthesis) satisfies the
+  Generate → Verify → Counter-example → Rewrite loop without requiring a running
+  LLM service; `LlmAgent` behind `--features llm` adds real-LLM support without
+  making it a hard dependency.
+
+The `compiler/` / `verifier/` / `ai-orchestrator/` names from spec.txt are
+**not** present on disk; the mapping is: parser+ir ≈ compiler front-end,
+verifier ≈ verifier, agent+router+codegen ≈ ai-orchestrator.
+
+## Crate documentation
+
+Individual crate READMEs have not yet been written; the table in the [Crates](#crates)
+section above is the authoritative per-crate summary. The source-of-truth for the
+grammar is `crates/telos-parser/src/grammar.ebnf`; for the full feature and phase
+history see [`TODO.md`](TODO.md); for example `.telos` files see [`examples/README.md`](examples/README.md).
+
+## Troubleshooting
+
+**`gofmt: command not found` / `go: command not found`**
+`telos project --check` and `telos eject` shell out to `go build` and `gofmt` to
+compile and canonicalize generated Go. If Go is not on your `PATH`, these commands
+fall back to a warning rather than a hard failure; the generated source is still
+written to disk. Install Go ≥ 1.21 and ensure `$GOPATH/bin` (or the Go install
+`bin/`) is on your `PATH`.
+
+**`--features z3` fails to build**
+The `z3` Cargo feature links against the Z3 C library via `z3-sys`, which requires
+`z3.h` on the compiler's include path and `libz3` at link time. Z3 is not vendored.
+Install Z3 development headers (e.g. `apt install libz3-dev` or `brew install z3`)
+before building with `--features z3`. The default feature set builds without any
+external C dependencies.
+
+**`cargo llvm-cov` not found**
+Coverage reporting requires `cargo-llvm-cov`. Install it with:
+```sh
+cargo install cargo-llvm-cov
+```
+
 ## License
 
 Licensed under either of:

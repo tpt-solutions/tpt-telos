@@ -11,7 +11,8 @@
 //!                                   guarded by their contracts
 //!   telos lsp                       run the language server (LSP over stdio)
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use serde::Serialize;
 use std::fs;
 use std::process::ExitCode;
@@ -46,11 +47,17 @@ enum Command {
         /// Output file path (default: <module>.telos).
         #[arg(long)]
         out: Option<String>,
+        /// Starter template to scaffold. Options: simple (default), dual-backend, eject.
+        #[arg(long, default_value = "simple")]
+        template: String,
     },
     /// Parse a .telos file and print its AST.
     Parse {
         /// Path to the .telos source file.
         file: String,
+        /// Emit machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
     },
     /// Run formal verification on a .telos file (pass/fail report).
     Verify {
@@ -134,6 +141,9 @@ enum Command {
         /// routing conflict with Go (GC is non-deterministic).
         #[arg(long)]
         strict_rt: bool,
+        /// Emit machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
     },
     /// Verify a proof manifest against the current source file.
     VerifyManifest {
@@ -142,6 +152,11 @@ enum Command {
         /// Path to the original .telos source file.
         source: String,
     },
+    /// Print shell completions for the given shell and exit.
+    Completions {
+        /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
+        shell: Shell,
+    },
     /// Run the tpt-telos language server (LSP over stdio) for IDE integration.
     Lsp,
 }
@@ -149,14 +164,18 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::Init { module, out } => match run_init(&module, out.as_deref()) {
+        Command::Init {
+            module,
+            out,
+            template,
+        } => match run_init(&module, out.as_deref(), &template) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("init error: {e}");
                 ExitCode::FAILURE
             }
         },
-        Command::Parse { file } => match run_parse(&file) {
+        Command::Parse { file, json } => match run_parse(&file, json) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("parse error: {e}");
@@ -233,7 +252,8 @@ fn main() -> ExitCode {
             func,
             llm,
             strict_rt,
-        } => match run_eject(&file, &out_dir, func.as_deref(), llm, strict_rt) {
+            json,
+        } => match run_eject(&file, &out_dir, func.as_deref(), llm, strict_rt, json) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("eject error: {e}");
@@ -248,6 +268,10 @@ fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
+        }
+        Command::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "telos", &mut std::io::stdout());
+            ExitCode::SUCCESS
         }
         Command::Lsp => match tpt_telos_lsp::run_stdio() {
             Ok(()) => ExitCode::SUCCESS,
@@ -284,47 +308,153 @@ fn canonicalize_go(go_dir: &std::path::Path) {
     }
 }
 
-fn run_init(module_name: &str, out: Option<&str>) -> Result<(), String> {
+fn run_init(module_name: &str, out: Option<&str>, template: &str) -> Result<(), String> {
     let default_path = format!("{}.telos", module_name);
     let path = out.unwrap_or(&default_path);
-    let template = format!(
-        "@boundary(cpu_bound)\n\
-         module {mod} {{\n\
-         \n\
-             invariant Counter {{\n\
-                 count >= 0\n\
-             }}\n\
-         \n\
-             func increment(c: Counter)\n\
-                 requires c.count >= 0\n\
-                 ensures c.count == old(c.count) + 1\n\
-             {{\n\
-                 mutate state {{\n\
-                     c.count += 1\n\
+    let content = match template {
+        "simple" | "" => format!(
+            "@boundary(cpu_bound)\n\
+             module {mod} {{\n\
+             \n\
+                 invariant Counter {{\n\
+                     count >= 0\n\
+                 }}\n\
+             \n\
+                 func increment(c: Counter)\n\
+                     requires c.count >= 0\n\
+                     ensures c.count == old(c.count) + 1\n\
+                 {{\n\
+                     mutate state {{\n\
+                         c.count += 1\n\
+                     }}\n\
+                 }}\n\
+             \n\
+                 func get(c: Counter): Int\n\
+                     requires c.count >= 0\n\
+                     ensures result == c.count\n\
+                 {{\n\
+                     mutate state {{\n\
+                         return c.count\n\
+                     }}\n\
+                 }}\n\
+             }}\n",
+            mod = module_name,
+        ),
+        "dual-backend" => format!(
+            "// Dual-backend template: one Rust module (cpu_bound) and one Go module (network_io).\n\
+             \n\
+             @boundary(cpu_bound)\n\
+             module {mod}Rust {{\n\
+             \n\
+                 invariant Counter {{\n\
+                     count >= 0\n\
+                 }}\n\
+             \n\
+                 func increment(c: Counter)\n\
+                     requires c.count >= 0\n\
+                     ensures c.count == old(c.count) + 1\n\
+                 {{\n\
+                     mutate state {{\n\
+                         c.count += 1\n\
+                     }}\n\
                  }}\n\
              }}\n\
-         \n\
-             func get(c: Counter): Int\n\
-                 requires c.count >= 0\n\
-                 ensures result == c.count\n\
-             {{\n\
-                 mutate state {{\n\
-                     return c.count\n\
+             \n\
+             @boundary(network_io)\n\
+             module {mod}Go {{\n\
+             \n\
+                 func handle(req: Int): Int\n\
+                     requires req >= 0\n\
+                     ensures result >= 0\n\
+                 {{\n\
+                     mutate state {{\n\
+                         return req\n\
+                     }}\n\
                  }}\n\
-             }}\n\
-         }}\n",
-        mod = module_name,
-    );
-    fs::write(path, &template).map_err(|e| format!("cannot write `{path}`: {e}"))?;
-    println!("Scaffolded {path} with module `{module_name}`.");
+             }}\n",
+            mod = module_name,
+        ),
+        "eject" => format!(
+            "@boundary(cpu_bound)\n\
+             module {mod} {{\n\
+             \n\
+                 // @eject marks this function as a trusted opaque block.\n\
+                 // The compiler generates a guard wrapper that enforces contracts at runtime.\n\
+                 @eject\n\
+                 func process(x: Int): Int\n\
+                     requires x >= 0\n\
+                     ensures result >= x\n\
+                 {{\n\
+                     mutate state {{\n\
+                         return x\n\
+                     }}\n\
+                 }}\n\
+             }}\n",
+            mod = module_name,
+        ),
+        other => return Err(format!(
+            "unknown template `{other}`; valid options: simple, dual-backend, eject"
+        )),
+    };
+    fs::write(path, &content).map_err(|e| format!("cannot write `{path}`: {e}"))?;
+    println!("Scaffolded {path} with module `{module_name}` (template: {template}).");
     println!("Run `telos verify {path}` to verify the contracts.");
     Ok(())
 }
 
-fn run_parse(file: &str) -> Result<(), String> {
+fn run_parse(file: &str, json: bool) -> Result<(), String> {
     let modules = load_modules(file)?;
-    for m in &modules {
-        println!("{}", render_module(m));
+    if json {
+        let json_modules: Vec<JsonParseModule> = modules
+            .iter()
+            .map(|m| {
+                let functions = m
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        if let Item::Func(f) = item {
+                            Some(JsonParseFunc {
+                                name: f.name.clone(),
+                                params: f
+                                    .params
+                                    .iter()
+                                    .map(|p| format!("{}: {}", p.name, render_type(&p.ty)))
+                                    .collect(),
+                                requires: f.requires.iter().map(pretty_expr).collect(),
+                                ensures: f.ensures.iter().map(pretty_expr).collect(),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let invariants = m
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        if let Item::Invariant(i) = item {
+                            Some(i.name.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                JsonParseModule {
+                    name: m.name.clone(),
+                    functions,
+                    invariants,
+                }
+            })
+            .collect();
+        let output = JsonParseOutput {
+            file: file.to_string(),
+            modules: json_modules,
+        };
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    } else {
+        for m in &modules {
+            println!("{}", render_module(m));
+        }
     }
     Ok(())
 }
@@ -377,6 +507,44 @@ struct JsonProjectOutput {
     has_go: bool,
     has_python: bool,
     has_ffi: bool,
+}
+
+#[derive(Serialize)]
+struct JsonParseFunc {
+    name: String,
+    params: Vec<String>,
+    requires: Vec<String>,
+    ensures: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct JsonParseModule {
+    name: String,
+    functions: Vec<JsonParseFunc>,
+    invariants: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct JsonParseOutput {
+    file: String,
+    modules: Vec<JsonParseModule>,
+}
+
+#[derive(Serialize)]
+struct JsonEjectEntry {
+    module: String,
+    func: String,
+    lang: String,
+}
+
+#[derive(Serialize)]
+struct JsonEjectOutput {
+    file: String,
+    func: Option<String>,
+    ejected: Vec<JsonEjectEntry>,
+    rust_code: Option<String>,
+    go_code: Option<String>,
+    files: Vec<String>,
 }
 
 fn collect_verify_output(
@@ -528,6 +696,10 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
             println!("RESULT: all constraints satisfied.");
         } else {
             println!("RESULT: verification failed (see FAIL above).");
+            println!(
+                "\nhint: some failures may be solver limitations (FM solver is incomplete \
+                 for nonlinear arithmetic); try --solver z3 for exact results"
+            );
         }
         Ok(overall)
     };
@@ -985,6 +1157,7 @@ fn run_eject(
     only: Option<&str>,
     llm: bool,
     strict_rt: bool,
+    json: bool,
 ) -> Result<(), String> {
     let mut modules = load_modules(file)?;
     let agent = make_agent(llm)?;
@@ -1073,6 +1246,42 @@ fn run_eject(
     manifest.push_str("  ]\n}\n");
     std::fs::write(root.join("telos-eject.json"), manifest)
         .map_err(|e| format!("cannot write manifest: {e}"))?;
+
+    if json {
+        let rust_code = project
+            .files
+            .iter()
+            .find(|f| f.path == "rust/src/lib.rs")
+            .map(|f| f.contents.clone());
+        let go_code = project
+            .files
+            .iter()
+            .find(|f| f.path == "go/service.go")
+            .map(|f| f.contents.clone());
+        let files: Vec<String> = project
+            .files
+            .iter()
+            .map(|f| f.path.clone())
+            .chain(std::iter::once("telos-eject.json".to_string()))
+            .collect();
+        let output = JsonEjectOutput {
+            file: file.to_string(),
+            func: only.map(|s| s.to_string()),
+            ejected: ejected
+                .iter()
+                .map(|(module, func, lang)| JsonEjectEntry {
+                    module: module.clone(),
+                    func: func.clone(),
+                    lang: lang.clone(),
+                })
+                .collect(),
+            rust_code,
+            go_code,
+            files,
+        };
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        return Ok(());
+    }
 
     println!("Ejected {} function(s) to {}/", ejected.len(), out_dir);
     for (module, func, lang) in &ejected {
