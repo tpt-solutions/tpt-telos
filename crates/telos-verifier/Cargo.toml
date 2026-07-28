@@ -18,9 +18,9 @@ default = []
 z3 = ["dep:z3"]
 
 [dependencies]
-tpt-telos-ir = { path = "../telos-ir", version = "0.1.0" }
+tpt-telos-ir = { path = "../telos-ir", version = "0.1.1" }
 z3 = { version = "0.12", optional = true }
 
 [dev-dependencies]
-tpt-telos-parser = { path = "../telos-parser", version = "0.1.0" }
+tpt-telos-parser = { path = "../telos-parser", version = "0.1.1" }
 proptest = "1"
