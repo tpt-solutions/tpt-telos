@@ -25,6 +25,91 @@ use tpt_telos_router::Target;
 
 use crate::{analyze_func, collect_types, go::exported, InputParam, TypeFields};
 
+// ---------------------------------------------------------------- type checks
+
+/// True if `name` is an integer scalar type supported at FFI boundaries.
+fn is_ffi_integer_type_name(name: &str) -> bool {
+    matches!(name, "Int" | "PositiveInt")
+}
+
+/// Human-readable representation of a type (used in error messages).
+fn type_display(ty: &Type) -> String {
+    match ty {
+        Type::Named(n) => n.clone(),
+        Type::Generic(n, args) => {
+            let args: Vec<_> = args.iter().map(type_display).collect();
+            format!("{}<{}>", n, args.join(", "))
+        }
+        Type::Tuple(elems) => {
+            let elems: Vec<_> = elems.iter().map(type_display).collect();
+            format!("({})", elems.join(", "))
+        }
+        Type::Array(elem, n) => format!("[{}; {}]", type_display(elem), n),
+        Type::Slice(elem) => format!("[{}]", type_display(elem)),
+    }
+}
+
+/// Validate that every parameter of `f` can cross an FFI boundary.
+///
+/// Only integer scalar types (`Int`, `PositiveInt`) and structs whose every
+/// field is one of those integer types are supported.  Everything else —
+/// floats, booleans, strings, arrays, slices, generics, tuples — is rejected
+/// with a descriptive error.
+fn validate_ffi_params(f: &Func, types: &TypeFields, module_name: &str) -> Result<(), String> {
+    for param in &f.params {
+        match &param.ty {
+            Type::Named(type_name) => {
+                if is_ffi_integer_type_name(type_name) {
+                    continue; // integer scalar — OK
+                }
+                match types.get(type_name.as_str()) {
+                    Some(fields) if !fields.is_empty() => {
+                        // Struct type: every field must be an integer type.
+                        for (field_name, field_ty) in fields {
+                            let ok = matches!(
+                                field_ty,
+                                Type::Named(n) if is_ffi_integer_type_name(n)
+                            );
+                            if !ok {
+                                return Err(format!(
+                                    "FFI boundary: unsupported type {} for field '{}' \
+                                     in '{}::{}' — only integer types are supported at \
+                                     FFI boundaries",
+                                    type_display(field_ty),
+                                    field_name,
+                                    module_name,
+                                    f.name
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        // Non-struct named type that is not a supported integer.
+                        return Err(format!(
+                            "FFI boundary: unsupported type {} for parameter '{}' \
+                             in '{}::{}' — only integer types are supported at \
+                             FFI boundaries",
+                            type_name, param.name, module_name, f.name
+                        ));
+                    }
+                }
+            }
+            other => {
+                return Err(format!(
+                    "FFI boundary: unsupported type {} for parameter '{}' \
+                     in '{}::{}' — only integer types are supported at \
+                     FFI boundaries",
+                    type_display(other),
+                    param.name,
+                    module_name,
+                    f.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A single function lifted to the FFI boundary.
 struct FfiFunc {
     module: String,
@@ -92,7 +177,10 @@ pub struct FfiBridge {
 }
 
 /// Build the FFI plan from every function in the program.
-fn plan(modules: &[Module], bodies: &HashMap<String, Vec<Stmt>>) -> Vec<FfiFunc> {
+///
+/// Returns `Err` if any parameter has a type that cannot be represented as an
+/// `int64_t` cell across the C ABI (e.g. `Float64`, `Bool`, `String`, arrays).
+fn plan(modules: &[Module], bodies: &HashMap<String, Vec<Stmt>>) -> Result<Vec<FfiFunc>, String> {
     let mut funcs = Vec::new();
     for m in modules {
         let mut types: TypeFields = HashMap::new();
@@ -100,6 +188,7 @@ fn plan(modules: &[Module], bodies: &HashMap<String, Vec<Stmt>>) -> Vec<FfiFunc>
         let target = tpt_telos_router::route(&m.attributes).target;
         for item in &m.items {
             if let Item::Func(f) = item {
+                validate_ffi_params(f, &types, &m.name)?;
                 let stmts = bodies
                     .get(&f.name)
                     .cloned()
@@ -115,22 +204,26 @@ fn plan(modules: &[Module], bodies: &HashMap<String, Vec<Stmt>>) -> Vec<FfiFunc>
             }
         }
     }
-    funcs
+    Ok(funcs)
 }
 
 /// Generate the complete FFI bridge for a program.
+///
+/// Returns `Err` if any parameter type at an FFI-routed boundary is not an
+/// integer type (`Int` / `PositiveInt`) or a struct whose fields are all
+/// integer types.
 pub fn generate_bridge(
     modules: &[Module],
     bodies: &HashMap<String, Vec<Stmt>>,
     go_package: &str,
-) -> FfiBridge {
-    let funcs = plan(modules, bodies);
-    FfiBridge {
+) -> Result<FfiBridge, String> {
+    let funcs = plan(modules, bodies)?;
+    Ok(FfiBridge {
         header: gen_header(&funcs),
         rust: gen_rust(&funcs),
         go: gen_go(&funcs, go_package),
         go_package: go_package.to_string(),
-    }
+    })
 }
 
 // ------------------------------------------------------------------ C header

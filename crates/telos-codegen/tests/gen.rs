@@ -54,7 +54,7 @@ fn elided_func_synthesizes_body() {
 fn microservice_routes_modules_to_both_backends() {
     let src = std::fs::read_to_string("../../examples/microservice.telos").unwrap();
     let (modules, outcomes) = outcomes_for(&src);
-    let project = generate_project(&modules, &outcomes);
+    let project = generate_project(&modules, &outcomes).unwrap();
 
     assert!(project.has_rust);
     assert!(project.has_go);
@@ -91,7 +91,7 @@ fn microservice_routes_modules_to_both_backends() {
 fn ffi_bridge_is_bidirectional() {
     let src = std::fs::read_to_string("../../examples/microservice.telos").unwrap();
     let (modules, outcomes) = outcomes_for(&src);
-    let project = generate_project(&modules, &outcomes);
+    let project = generate_project(&modules, &outcomes).unwrap();
     let file = |p: &str| {
         project
             .files

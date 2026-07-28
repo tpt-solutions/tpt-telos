@@ -322,7 +322,7 @@ fn eject_preview(text: &str, func: Option<&str>) -> Result<String, String> {
         ));
     }
 
-    let project = tpt_telos_codegen::generate_project(&modules, &outcomes);
+    let project = tpt_telos_codegen::generate_project(&modules, &outcomes)?;
     let mut preview = String::new();
     for f in &project.files {
         if f.path.ends_with(".rs") || f.path.ends_with(".go") {

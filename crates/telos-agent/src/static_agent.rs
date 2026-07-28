@@ -51,7 +51,18 @@ impl CodeAgent for StaticAgent {
 
     fn generate(&self, spec: &FuncSpec) -> Result<Candidate, String> {
         if spec.func.elided || spec.func.body.is_empty() {
-            Ok(synthesize_from_ensures(spec))
+            let candidate = synthesize_from_ensures(spec);
+            // If synthesis produced an empty body but the function has ensures
+            // clauses, we were unable to derive an implementation from them.
+            if candidate.stmts.is_empty() && !spec.func.ensures.is_empty() {
+                return Err(format!(
+                    "static-synth: cannot synthesize a body for '{}' — \
+                     no equality or supported inequality constraints found in \
+                     its `ensures` clauses",
+                    spec.func.name
+                ));
+            }
+            Ok(candidate)
         } else {
             Ok(Candidate {
                 stmts: spec.func.body.clone(),
@@ -304,6 +315,36 @@ pub fn synthesize_from_ensures(spec: &FuncSpec) -> Candidate {
                             args,
                         }),
                     }));
+                }
+            }
+            Expr::Bin {
+                op: BinOp::Ge | BinOp::Le | BinOp::Gt | BinOp::Lt,
+                lhs,
+                ..
+            } => {
+                // Inequality-only postcondition (e.g. `ensures result >= 0`).
+                // Synthesize a conservative first attempt: assign 0 to the LHS
+                // target.  The rewrite loop will refine if the verifier rejects it.
+                let zero = Expr::Int(0);
+                match &**lhs {
+                    Expr::Field { base, field } => {
+                        field_assigns.push(Assign {
+                            target: Expr::Field {
+                                base: base.clone(),
+                                field: field.clone(),
+                            },
+                            op: AssignOp::Set,
+                            value: zero,
+                        });
+                    }
+                    Expr::Var(v) => {
+                        var_assigns.push(Assign {
+                            target: Expr::Var(v.clone()),
+                            op: AssignOp::Set,
+                            value: zero,
+                        });
+                    }
+                    _ => {}
                 }
             }
             _ => {

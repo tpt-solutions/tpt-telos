@@ -947,7 +947,7 @@ fn run_project(
         }
     }
 
-    let project = generate_project(&modules, &outcomes);
+    let project = generate_project(&modules, &outcomes)?;
 
     // --strict-rt: promote routing conflicts to hard errors.
     if strict_rt {
@@ -1160,6 +1160,28 @@ fn run_eject(
     json: bool,
 ) -> Result<(), String> {
     let mut modules = load_modules(file)?;
+
+    // Bug 3 fix: when --func <name> is specified, verify the function exists
+    // before we do any work. Without this check a non-existent name silently
+    // falls through and any @eject-marked function is ejected instead.
+    if let Some(func_name) = only {
+        let found = modules.iter().any(|m| {
+            m.items.iter().any(|item| {
+                if let Item::Func(f) = item {
+                    f.name == func_name
+                } else {
+                    false
+                }
+            })
+        });
+        if !found {
+            return Err(format!(
+                "error: function '{}' not found in {}",
+                func_name, file
+            ));
+        }
+    }
+
     let agent = make_agent(llm)?;
 
     // Transpile first so ejected opaque blocks are seeded with verified bodies.
@@ -1200,7 +1222,7 @@ fn run_eject(
         ));
     }
 
-    let project = generate_project(&modules, &outcomes);
+    let project = generate_project(&modules, &outcomes)?;
     let root = std::path::Path::new(out_dir);
 
     // Surface routing diagnostics as warnings.

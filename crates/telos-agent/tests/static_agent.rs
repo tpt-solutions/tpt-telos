@@ -135,8 +135,9 @@ fn synthesize_resolves_nested_old_arithmetic() {
 }
 
 #[test]
-fn synthesize_ignores_non_equality_clause() {
-    // A `>=` clause cannot be synthesized into an assignment; it is skipped.
+fn synthesize_inequality_clause_produces_conservative_zero() {
+    // A `>=` clause (e.g. `ensures x >= 0`) should synthesise `x = 0` as a
+    // conservative first attempt rather than silently producing an empty body.
     let func = func_with(
         "f",
         vec![Param {
@@ -152,8 +153,19 @@ fn synthesize_ignores_non_equality_clause() {
     let spec = FuncSpec::new(vec![], func);
     let cand = synthesize_from_ensures(&spec);
     assert!(
-        cand.stmts.is_empty(),
-        "non-equality clause must yield no body"
+        !cand.stmts.is_empty(),
+        "inequality ensures must synthesize a conservative body, not an empty one"
+    );
+    // The synthesised body must assign 0 to `x`.
+    assert!(
+        matches!(
+            &cand.stmts[0],
+            Stmt::Assign(a)
+                if matches!(&a.target, Expr::Var(v) if v == "x")
+                    && matches!(&a.value, Expr::Int(0))
+        ),
+        "expected assignment `x = 0`, got {:?}",
+        cand.stmts
     );
 }
 

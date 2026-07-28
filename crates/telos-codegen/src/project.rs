@@ -54,7 +54,7 @@ pub const GO_PACKAGE: &str = "gosvc";
 ///     .flat_map(|m| transpile_module(m, &StaticAgent::new()).unwrap())
 ///     .collect();
 ///
-/// let project = generate_project(&modules, &outcomes);
+/// let project = generate_project(&modules, &outcomes).unwrap();
 /// let lib = project.files.iter().find(|f| f.path == "rust/src/lib.rs").unwrap();
 /// assert!(lib.contents.contains("pub struct Wallet"));
 /// ```
@@ -101,7 +101,7 @@ impl Project {
     ///     .flat_map(|m| transpile_module(m, &StaticAgent::new()).unwrap())
     ///     .collect();
     ///
-    /// let project = generate_project(&modules, &outcomes);
+    /// let project = generate_project(&modules, &outcomes).unwrap();
     /// project.write(std::path::Path::new("/tmp/my_bank_project")).unwrap();
     /// // Writes rust/src/lib.rs, rust/Cargo.toml, and go/service.go etc.
     /// ```
@@ -118,6 +118,9 @@ impl Project {
 }
 
 /// Assemble the dual-backend project for a program.
+///
+/// Returns `Err` if any FFI-boundary parameter type is unsupported (e.g. a
+/// float, bool, string, array, or slice).  All-integer programs always succeed.
 ///
 /// # Examples
 ///
@@ -140,12 +143,12 @@ impl Project {
 ///     .flat_map(|m| transpile_module(m, &StaticAgent::new()).unwrap())
 ///     .collect();
 ///
-/// let project = generate_project(&modules, &outcomes);
+/// let project = generate_project(&modules, &outcomes).unwrap();
 /// // A Rust-only program (no @boundary(network_io) etc.) only produces Rust output.
 /// assert!(project.has_rust);
 /// assert!(!project.has_ffi);
 /// ```
-pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project {
+pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Result<Project, String> {
     let bodies = collect_bodies(outcomes);
 
     // Route every module and collect diagnostics.
@@ -198,7 +201,7 @@ pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project
     }
 
     if has_ffi {
-        let bridge = ffi::generate_bridge(modules, &bodies, GO_PACKAGE);
+        let bridge = ffi::generate_bridge(modules, &bodies, GO_PACKAGE)?;
         files.push(GeneratedFile {
             path: "rust/src/ffi.rs".to_string(),
             contents: bridge.rust,
@@ -239,14 +242,14 @@ pub fn generate_project(modules: &[Module], outcomes: &[FuncOutcome]) -> Project
         });
     }
 
-    Project {
+    Ok(Project {
         files,
         has_rust,
         has_go,
         has_ffi,
         has_python,
         diagnostics: all_diagnostics,
-    }
+    })
 }
 
 fn rust_cargo_toml(dual: bool) -> String {

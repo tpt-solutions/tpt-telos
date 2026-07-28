@@ -77,6 +77,12 @@ pub enum DiagnosticKind {
     RealTimeGoConflict,
     /// A `zero_allocation` module was routed to Go, which allocates via GC.
     ZeroAllocGoConflict,
+    /// A `real_time` module was routed to Python (GC + interpreter).
+    RealTimePythonConflict,
+    /// A `zero_allocation` module was routed to Python (GC + interpreter).
+    ZeroAllocPythonConflict,
+    /// An `@state(...)` attribute contained an unrecognized value (possible typo).
+    UnrecognizedStateValue,
 }
 
 /// The storage class for a module's data structures, derived from
@@ -156,9 +162,10 @@ fn boundary_flags(attrs: &[Attribute]) -> Vec<String> {
 }
 
 /// Parse `@state(persistent)` or `@state(ephemeral)` from module attributes.
-/// Returns `StorageClass::Ephemeral` if no `@state(...)` is present or if the
-/// argument is unrecognised.
-fn parse_storage_class(attrs: &[Attribute]) -> StorageClass {
+/// Returns `(StorageClass, Option<unrecognized_value>)`. The second element is
+/// `Some(value)` when a `@state(...)` attribute was present but the value was
+/// not a recognized keyword (possible typo), so callers can emit a diagnostic.
+fn parse_storage_class(attrs: &[Attribute]) -> (StorageClass, Option<String>) {
     for attr in attrs {
         if attr.name != "state" {
             continue;
@@ -166,23 +173,23 @@ fn parse_storage_class(attrs: &[Attribute]) -> StorageClass {
         for arg in &attr.args {
             if let Arg::Flag(f) = arg {
                 match f.as_str() {
-                    "persistent" => return StorageClass::Persistent,
-                    "ephemeral" => return StorageClass::Ephemeral,
-                    _ => {}
+                    "persistent" => return (StorageClass::Persistent, None),
+                    "ephemeral" => return (StorageClass::Ephemeral, None),
+                    other => return (StorageClass::default(), Some(other.to_string())),
                 }
             }
             if let Arg::Kv(k, tpt_telos_parser::ast::Literal::Ident(v)) = arg {
                 if k == "class" {
                     match v.as_str() {
-                        "persistent" => return StorageClass::Persistent,
-                        "ephemeral" => return StorageClass::Ephemeral,
-                        _ => {}
+                        "persistent" => return (StorageClass::Persistent, None),
+                        "ephemeral" => return (StorageClass::Ephemeral, None),
+                        other => return (StorageClass::default(), Some(other.to_string())),
                     }
                 }
             }
         }
     }
-    StorageClass::default()
+    (StorageClass::default(), None)
 }
 
 /// Route a module from its `@boundary` attributes and emit diagnostics for
@@ -212,7 +219,7 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
     let flags = boundary_flags(attrs);
 
     // Parse @state(...) for storage class.
-    let storage = parse_storage_class(attrs);
+    let (storage, unrecognized_state) = parse_storage_class(attrs);
 
     let mut go_hits = Vec::new();
     let mut rust_hits = Vec::new();
@@ -255,6 +262,19 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
     };
 
     let mut diagnostics = Vec::new();
+
+    if let Some(ref bad_val) = unrecognized_state {
+        diagnostics.push(RoutingDiagnostic {
+            kind: DiagnosticKind::UnrecognizedStateValue,
+            module: module_name.to_string(),
+            message: format!(
+                "module `{}` has unrecognized `@state({})` value; \
+                 valid values are `persistent` and `ephemeral` (defaulting to ephemeral)",
+                module_name, bad_val
+            ),
+        });
+    }
+
     if route.target == Target::Go {
         if rust_hits.iter().any(|f| f == "real_time") {
             diagnostics.push(RoutingDiagnostic {
@@ -276,6 +296,32 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
                     "module `{}` has `zero_allocation` flag but is routed to Go \
                      (Go allocates via GC; zero-allocation guarantees cannot be upheld; \
                      see ARCHITECTURE.md § Go GC Determinism)",
+                    module_name
+                ),
+            });
+        }
+    }
+
+    if route.target == Target::Python {
+        if rust_hits.iter().any(|f| f == "real_time") {
+            diagnostics.push(RoutingDiagnostic {
+                kind: DiagnosticKind::RealTimePythonConflict,
+                module: module_name.to_string(),
+                message: format!(
+                    "module `{}` has `real_time` flag but is routed to Python \
+                     (Python is GC-based with non-deterministic latency; \
+                     hard real-time targets must use Rust)",
+                    module_name
+                ),
+            });
+        }
+        if rust_hits.iter().any(|f| f == "zero_allocation") {
+            diagnostics.push(RoutingDiagnostic {
+                kind: DiagnosticKind::ZeroAllocPythonConflict,
+                module: module_name.to_string(),
+                message: format!(
+                    "module `{}` has `zero_allocation` flag but is routed to Python \
+                     (Python allocates via GC; zero-allocation guarantees cannot be upheld)",
                     module_name
                 ),
             });

@@ -199,18 +199,19 @@ fn linearize_bounded(
     var_fn: &dyn Fn(&str) -> String,
     bounds: &VarBounds,
     approximated: &mut bool,
+    prefer_min_corner: bool,
 ) -> Result<Linear, String> {
     match expr {
         Expr::Int(n) => Ok(Linear::constant_only(*n)),
         Expr::Var(name) => Ok(Linear::var(&var_fn(name))),
         Expr::Field { base, field } => Ok(Linear::var(&field_fn(base, field))),
-        Expr::Old(e) => linearize_bounded(e, &|b, f| pre_field(b, f), var_fn, bounds, approximated),
+        Expr::Old(e) => linearize_bounded(e, &|b, f| pre_field(b, f), var_fn, bounds, approximated, prefer_min_corner),
         Expr::Unary { op, expr } => match op {
-            UnOp::Neg => Ok(linearize_bounded(expr, field_fn, var_fn, bounds, approximated)?.neg()),
+            UnOp::Neg => Ok(linearize_bounded(expr, field_fn, var_fn, bounds, approximated, prefer_min_corner)?.neg()),
         },
         Expr::Bin { op, lhs, rhs } => {
-            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
-            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated)?;
+            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated, prefer_min_corner)?;
+            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated, prefer_min_corner)?;
             match op {
                 BinOp::Add => Ok(l.add(&r)),
                 BinOp::Sub => Ok(l.sub(&r)),
@@ -221,7 +222,9 @@ fn linearize_bounded(
                         Ok(r.scale(k))
                     } else {
                         // Try interval bounding: replace a * b with a constant
-                        // derived from the worst-case product of their bounds.
+                        // derived from the product of their bounds. `prefer_min_corner`
+                        // selects min vs max so callers can request both and check both
+                        // extremes for soundness (see `to_constraints_bounded_dnf`).
                         let a_name = expr_var_name(lhs, field_fn, var_fn);
                         let b_name = expr_var_name(rhs, field_fn, var_fn);
                         if let (Some(ref a), Some(ref b)) = (a_name, b_name) {
@@ -238,7 +241,11 @@ fn linearize_bounded(
                                     a_hi.saturating_mul(*b_lo),
                                     a_hi.saturating_mul(*b_hi),
                                 ];
-                                let product_bound = *corners.iter().max().unwrap();
+                                let product_bound = if prefer_min_corner {
+                                    *corners.iter().min().unwrap()
+                                } else {
+                                    *corners.iter().max().unwrap()
+                                };
                                 *approximated = true;
                                 return Ok(Linear::constant_only(product_bound));
                             }
@@ -310,8 +317,8 @@ fn to_constraints_bounded(
         }
         Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
             let rel = relation_of(*op).unwrap();
-            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
-            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated)?;
+            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated, false)?;
+            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated, false)?;
             let diff = l.sub(&r);
             Ok(vec![Constraint(diff, rel)])
         }
@@ -344,10 +351,28 @@ fn to_constraints_bounded_dnf(
         }
         Expr::Bin { op, lhs, rhs } if relation_of(*op).is_some() => {
             let rel = relation_of(*op).unwrap();
-            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated)?;
-            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated)?;
-            let diff = l.sub(&r);
-            Ok(vec![vec![Constraint(diff, rel)]])
+            // Compute the max-corner bound first.
+            let mut approx_max = false;
+            let l_max = linearize_bounded(lhs, field_fn, var_fn, bounds, &mut approx_max, false)?;
+            let r_max = linearize_bounded(rhs, field_fn, var_fn, bounds, &mut approx_max, false)?;
+            let diff_max = l_max.sub(&r_max);
+            if approx_max {
+                // When interval bounding was used, also compute the min-corner bound
+                // and include both constraints in the same conjunction. This is sound
+                // regardless of the relation direction: for `>=`, the binding check is
+                // the min-corner; for `<=`, the binding check is the max-corner.
+                let mut approx_min = false;
+                let l_min = linearize_bounded(lhs, field_fn, var_fn, bounds, &mut approx_min, true)?;
+                let r_min = linearize_bounded(rhs, field_fn, var_fn, bounds, &mut approx_min, true)?;
+                let diff_min = l_min.sub(&r_min);
+                *approximated = true;
+                Ok(vec![vec![
+                    Constraint(diff_max, rel.clone()),
+                    Constraint(diff_min, rel),
+                ]])
+            } else {
+                Ok(vec![vec![Constraint(diff_max, rel)]])
+            }
         }
         _ => Err("expected a boolean constraint (comparison, `&&`, or `||`)".into()),
     }
@@ -439,25 +464,32 @@ fn to_constraints_dnf(
             let cond_branch = to_constraints_dnf(&i.condition, field_fn, var_fn)?;
             let then_branch = to_constraints_dnf(&i.then_expr, field_fn, var_fn)?;
             let else_branch = to_constraints_dnf(&i.else_expr, field_fn, var_fn)?;
-
-            // Negate the condition: for each DNF branch of cond, negate the
-            // leaf comparisons. Simple approach: treat !cond as a fresh path.
-            // Since we can't easily negate arbitrary conditions in DNF,
-            // we use the "else" path as-is and assume the negation is valid.
+            let neg_cond = negate_dnf(&cond_branch);
             let mut out = combine_dnf(&cond_branch, &then_branch);
-            // For the else branch, we need !cond. Since we can't negate
-            // general conditions, we just include the else branch as a
-            // separate path (the verifier will check both).
-            out.extend(else_branch);
+            out.extend(combine_dnf(&neg_cond, &else_branch));
             Ok(out)
         }
         Expr::Match(m) => {
             // match scrutinee { pattern => body, ... }
-            // Expand each arm as a separate DNF path.
+            // Each arm: (scrutinee == pattern_value) && body.
+            // Only Literal patterns can be expressed as linear premises;
+            // Wildcard/Var/Constructor arms fall through without a premise.
+            let scrutinee_lin = linearize(&m.scrutinee, field_fn, var_fn);
             let mut out = Vec::new();
             for arm in &m.arms {
-                let branch = to_constraints_dnf(&arm.expr, field_fn, var_fn)?;
-                out.extend(branch);
+                let arm_branches = to_constraints_dnf(&arm.expr, field_fn, var_fn)?;
+                match &arm.pattern {
+                    tpt_telos_parser::ast::Pattern::Literal(n) => {
+                        if let Ok(ref s) = scrutinee_lin {
+                            let diff = s.sub(&Linear::constant_only(*n));
+                            let premise_dnf = vec![vec![Constraint(diff, Relation::Eq)]];
+                            out.extend(combine_dnf(&premise_dnf, &arm_branches));
+                        } else {
+                            out.extend(arm_branches);
+                        }
+                    }
+                    _ => out.extend(arm_branches),
+                }
             }
             if out.is_empty() {
                 Ok(vec![vec![]])
@@ -651,6 +683,30 @@ fn combine_dnf(a: &[Vec<Constraint>], b: &[Vec<Constraint>]) -> Vec<Vec<Constrai
         }
     }
     out
+}
+
+/// Negate a DNF form using De Morgan's laws:
+///   !(A || B || ...) = !A && !B && ...
+/// where negating one conjunction [c1, c2, ...] yields [!c1] || [!c2] || ...
+/// The result is itself in DNF form (a list of conjunction branches).
+fn negate_dnf(dnf: &[Vec<Constraint>]) -> Vec<Vec<Constraint>> {
+    // Start with `true` (single empty branch, represents "no constraints").
+    let mut result: Vec<Vec<Constraint>> = vec![vec![]];
+    for conj_branch in dnf {
+        if conj_branch.is_empty() {
+            // An empty conjunction is `true`; !(true) = false → empty DNF.
+            return vec![];
+        }
+        // !(c1 && c2 && ...) = !c1 || !c2 || ...
+        // Each negated constraint becomes its own single-constraint branch.
+        let neg_conj: Vec<Vec<Constraint>> = conj_branch
+            .iter()
+            .map(|c| vec![Constraint(c.0.clone(), negate_relation(&c.1))])
+            .collect();
+        // AND the negated conjunction into the accumulated result.
+        result = combine_dnf(&result, &neg_conj);
+    }
+    result
 }
 
 /// Negate a single relation as one constraint (`x R y` -> `x (not R) y`).
