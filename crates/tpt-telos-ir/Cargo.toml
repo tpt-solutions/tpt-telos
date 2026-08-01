@@ -14,7 +14,7 @@ categories = ["compilers", "development-tools"]
 description = "Intermediate representation and constraint extraction for tpt-telos"
 
 [dependencies]
-tpt-telos-parser = { path = "../telos-parser", version = "0.1.1" }
+tpt-telos-parser = { path = "../tpt-telos-parser", version = "0.1.1" }
 
 [dev-dependencies]
 proptest = "1"

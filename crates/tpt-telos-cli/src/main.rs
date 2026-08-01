@@ -392,9 +392,11 @@ fn run_init(module_name: &str, out: Option<&str>, template: &str) -> Result<(), 
              }}\n",
             mod = module_name,
         ),
-        other => return Err(format!(
-            "unknown template `{other}`; valid options: simple, dual-backend, eject"
-        )),
+        other => {
+            return Err(format!(
+                "unknown template `{other}`; valid options: simple, dual-backend, eject"
+            ))
+        }
     };
     fs::write(path, &content).map_err(|e| format!("cannot write `{path}`: {e}"))?;
     println!("Scaffolded {path} with module `{module_name}` (template: {template}).");

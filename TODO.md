@@ -1,9 +1,9 @@
 # tpt-telos TODO
 
 ## Phase 1: The Core & The Parser (Months 1-3)
-- [x] Define the formal grammar for tpt-telos. (see `crates/telos-parser/src/grammar.ebnf`)
-- [x] Build the Rust-based parser and AST generator. (`crates/telos-parser`)
-- [x] Implement the basic constraint extraction (translating requires/ensures to a linear-arithmetic SMT core). (`crates/telos-ir`, `crates/telos-verifier`)
+- [x] Define the formal grammar for tpt-telos. (see `crates/tpt-telos-parser/src/grammar.ebnf`)
+- [x] Build the Rust-based parser and AST generator. (`crates/tpt-telos-parser`)
+- [x] Implement the basic constraint extraction (translating requires/ensures to a linear-arithmetic SMT core). (`crates/tpt-telos-ir`, `crates/tpt-telos-verifier`)
 - [x] **Milestone:** A CLI that can parse a .telos file and output a formal verification pass/fail. (`telos verify <file>`)
 
 > Phase 1 implemented: a Cargo workspace (`telos-parser`, `telos-ir`, `telos-verifier`, `telos-cli`)
@@ -39,8 +39,8 @@
 > `examples/intent.telos` (body elided; synthesized from `ensures` and verified).
 
 ## Phase 3: The Dual-Target & FFI (Months 7-9)
-- [x] Implement the Go backend generation. (`crates/telos-codegen/src/go.rs`)
-- [x] Build the automated FFI layer so generated Rust and Go code can call each other without manual glue code. (`crates/telos-codegen/src/ffi.rs`)
+- [x] Implement the Go backend generation. (`crates/tpt-telos-codegen/src/go.rs`)
+- [x] Build the automated FFI layer so generated Rust and Go code can call each other without manual glue code. (`crates/tpt-telos-codegen/src/ffi.rs`)
 - [x] **Milestone:** A fully functioning dual-backend compilation of a microservice. (`telos project examples/microservice.telos --check`)
 
 > Phase 3 implemented: the code generator now emits **both** backends and the
@@ -72,8 +72,8 @@
 > (incl. the cgo FFI bridge) is well-formed and compiles.
 
 ## Phase 4: The "Eject" Hatch & DX (Months 10-12)
-- [x] Implement the two-way bridge for ejecting code to raw Rust/Go. (`crates/telos-codegen/src/eject.rs`, `telos eject`, `@eject` attribute)
-- [x] Build the LSP server for IDE integration. (`crates/telos-lsp`, `telos lsp`)
+- [x] Implement the two-way bridge for ejecting code to raw Rust/Go. (`crates/tpt-telos-codegen/src/eject.rs`, `telos eject`, `@eject` attribute)
+- [x] Build the LSP server for IDE integration. (`crates/tpt-telos-lsp`, `telos lsp`)
 - [x] **Milestone:** tpt-telos v1.0 release, ready for internal use in tpt-swarm and tpt-eve.
 
 > Phase 4 implemented: the "eject" hatch and a language server complete the DX.
@@ -88,7 +88,7 @@
 >   `telos-codegen/src/eject.rs`; honored by `transpile` / `project` / `build`
 >   and driven by the `telos eject` command (which also writes a
 >   `telos-eject.json` manifest). Generated Go is canonicalised with `gofmt`.
-> - **LSP server:** `crates/telos-lsp` is a dependency-light JSON-RPC 2.0 server
+> - **LSP server:** `crates/tpt-telos-lsp` is a dependency-light JSON-RPC 2.0 server
 >   over stdio (`Content-Length` framing) exposing:
 >   - **diagnostics** (parse errors + unsatisfied contracts) on
 >     open/change/save; ejected functions are surfaced as trusted (informational)
@@ -106,69 +106,69 @@
 
 ## Phase 5: Verifier Hardening & Platform Extensions
 
-- [x] **Nonlinear interval bounding** — over-approximate `x * y` contracts via interval arithmetic when both variables have bounds in `requires` clauses; mark results `[interval-bounded]` in verify output. (`crates/telos-ir/src/extract.rs`, `crates/telos-verifier/src/verify.rs`)
-- [x] **Python/JAX codegen target** — `@boundary(ml_training|python|jax)` routes to a Python backend that emits `@dataclass` structs with `satisfies_invariants()` and runtime `assert` guards for all contracts; JAX flag emits `jnp.int64` type annotations. (`crates/telos-codegen/src/python.rs`, `crates/telos-router/src/lib.rs`)
-- [x] **Real-time routing guard** — detect `@boundary(real_time)` or `@boundary(zero_allocation)` modules routed to Go (GC-based, non-deterministic) and emit `WARNING [real_time_go_conflict]`; `--strict-rt` flag exits non-zero. (`crates/telos-router/src/lib.rs`, `crates/telos-cli/src/main.rs`)
-- [x] **Cryptographic proof manifest** — generate `telos-proof.json` (SHA-256 of source, per-function verification outcomes, tamper-evident `manifest_hash`) on every `build`/`project` run, and embed it as `#[used] static TELOS_PROOF_MANIFEST` in generated Rust binary (spec §7). (`crates/telos-codegen/src/proof.rs`)
+- [x] **Nonlinear interval bounding** — over-approximate `x * y` contracts via interval arithmetic when both variables have bounds in `requires` clauses; mark results `[interval-bounded]` in verify output. (`crates/tpt-telos-ir/src/extract.rs`, `crates/tpt-telos-verifier/src/verify.rs`)
+- [x] **Python/JAX codegen target** — `@boundary(ml_training|python|jax)` routes to a Python backend that emits `@dataclass` structs with `satisfies_invariants()` and runtime `assert` guards for all contracts; JAX flag emits `jnp.int64` type annotations. (`crates/tpt-telos-codegen/src/python.rs`, `crates/tpt-telos-router/src/lib.rs`)
+- [x] **Real-time routing guard** — detect `@boundary(real_time)` or `@boundary(zero_allocation)` modules routed to Go (GC-based, non-deterministic) and emit `WARNING [real_time_go_conflict]`; `--strict-rt` flag exits non-zero. (`crates/tpt-telos-router/src/lib.rs`, `crates/tpt-telos-cli/src/main.rs`)
+- [x] **Cryptographic proof manifest** — generate `telos-proof.json` (SHA-256 of source, per-function verification outcomes, tamper-evident `manifest_hash`) on every `build`/`project` run, and embed it as `#[used] static TELOS_PROOF_MANIFEST` in generated Rust binary (spec §7). (`crates/tpt-telos-codegen/src/proof.rs`)
 - [x] **Language feature matrix** — document supported/partial/unsupported constructs in `grammar.ebnf` and `README.md`; eliminates ambiguity for integrators writing FADEC-level control logic.
 
 ## Phase 6: Scale, Precision & Language Completeness
 ## Phase 6: Scale, Precision & Language Completeness
 
-- [x] **Distributed SMT solver cluster** — gRPC-based `VerificationProblem` dispatch to a pool of solver workers; enables CI/CV verification at scale without single-machine bottlenecks. (`crates/telos-verifier/src/cluster.rs`)
-- [x] **Z3/CVC5 optional backend** — behind a `--solver z3` flag; falls back to built-in Fourier-Motzkin when unavailable; provides exact nonlinear arithmetic for contracts that interval bounding cannot verify. (`crates/telos-verifier/src/z3_solver.rs`, `--features z3`)
-- [x] **Production coverage lift** — raise workspace line coverage from ~80% to 90%+ using proptest (property-based) and cargo-fuzz (fuzz) harnesses; add mutation testing (cargo-mutants). (`Cargo.toml` workspace dev-dependencies, `crates/telos-ir/tests/property.rs`, `crates/telos-verifier/tests/property.rs`)
-- [x] **Go GC determinism formal documentation** — document in `ARCHITECTURE.md` exactly which Go-routed module classes are safe vs. unsafe for hard real-time; wire into the `real_time` routing guard as an informational reference. (`ARCHITECTURE.md`, `crates/telos-router/src/lib.rs`)
-- [x] **Disjunction (`||`) in premises** — currently parsed but rejected at the IR level; implement DNF normalization so `requires a || b` expands into two verification sub-problems, each solved independently. (`crates/telos-ir/src/extract.rs`)
-- [x] **Floating-point types** — `Float32`/`Float64` refinement types; IR lowering uses IEEE 754 interval arithmetic; verifier tracks rounding error bounds. (`crates/telos-codegen/src/lib.rs`, `crates/telos-codegen/src/go.rs`)
-- [x] **`@state(...)` semantics** — `@state(persistent)` / `@state(ephemeral)` currently parsed but ignored; implement storage-class semantics in the router and codegen (e.g., `persistent` → database-backed struct, `ephemeral` → stack-only). (`crates/telos-router/src/lib.rs`, `crates/telos-codegen/src/lib.rs`, `crates/telos-codegen/src/go.rs`)
-- [x] **Array and slice support** — `[T; N]` fixed arrays and `[T]` slices in type positions; IR constraint extraction for length/index invariants; codegen for Rust `[T; N]` and Go `[N]T`. (`crates/telos-parser/src/ast.rs`, `crates/telos-parser/src/parser.rs`, `crates/telos-codegen/src/lib.rs`, `crates/telos-codegen/src/go.rs`)
-- [x] **Cross-module references** — allow one module's invariant types to appear in another module's function signatures; requires a global type resolution pass over `Vec<Module>` before IR lowering. (`crates/telos-ir/src/extract.rs`)
+- [x] **Distributed SMT solver cluster** — gRPC-based `VerificationProblem` dispatch to a pool of solver workers; enables CI/CV verification at scale without single-machine bottlenecks. (`crates/tpt-telos-verifier/src/cluster.rs`)
+- [x] **Z3/CVC5 optional backend** — behind a `--solver z3` flag; falls back to built-in Fourier-Motzkin when unavailable; provides exact nonlinear arithmetic for contracts that interval bounding cannot verify. (`crates/tpt-telos-verifier/src/z3_solver.rs`, `--features z3`)
+- [x] **Production coverage lift** — raise workspace line coverage from ~80% to 90%+ using proptest (property-based) and cargo-fuzz (fuzz) harnesses; add mutation testing (cargo-mutants). (`Cargo.toml` workspace dev-dependencies, `crates/tpt-telos-ir/tests/property.rs`, `crates/tpt-telos-verifier/tests/property.rs`)
+- [x] **Go GC determinism formal documentation** — document in `ARCHITECTURE.md` exactly which Go-routed module classes are safe vs. unsafe for hard real-time; wire into the `real_time` routing guard as an informational reference. (`ARCHITECTURE.md`, `crates/tpt-telos-router/src/lib.rs`)
+- [x] **Disjunction (`||`) in premises** — currently parsed but rejected at the IR level; implement DNF normalization so `requires a || b` expands into two verification sub-problems, each solved independently. (`crates/tpt-telos-ir/src/extract.rs`)
+- [x] **Floating-point types** — `Float32`/`Float64` refinement types; IR lowering uses IEEE 754 interval arithmetic; verifier tracks rounding error bounds. (`crates/tpt-telos-codegen/src/lib.rs`, `crates/tpt-telos-codegen/src/go.rs`)
+- [x] **`@state(...)` semantics** — `@state(persistent)` / `@state(ephemeral)` currently parsed but ignored; implement storage-class semantics in the router and codegen (e.g., `persistent` → database-backed struct, `ephemeral` → stack-only). (`crates/tpt-telos-router/src/lib.rs`, `crates/tpt-telos-codegen/src/lib.rs`, `crates/tpt-telos-codegen/src/go.rs`)
+- [x] **Array and slice support** — `[T; N]` fixed arrays and `[T]` slices in type positions; IR constraint extraction for length/index invariants; codegen for Rust `[T; N]` and Go `[N]T`. (`crates/tpt-telos-parser/src/ast.rs`, `crates/tpt-telos-parser/src/parser.rs`, `crates/tpt-telos-codegen/src/lib.rs`, `crates/tpt-telos-codegen/src/go.rs`)
+- [x] **Cross-module references** — allow one module's invariant types to appear in another module's function signatures; requires a global type resolution pass over `Vec<Module>` before IR lowering. (`crates/tpt-telos-ir/src/extract.rs`)
 
 ## Phase 7: Verification Result Quality & Contract-Language Completeness
 
 - [x] **Surface counterexamples from `telos verify`** — `CheckResult` gains a
   `counterexample: Option<Model>` populated via the existing
   `solver::counterexample()`; CLI and LSP print/report the concrete witness
-  on every `FAIL`, not just the restated clause text. (`crates/telos-verifier/src/verify.rs`,
-  `crates/telos-cli/src/main.rs`, `crates/telos-lsp/src/analysis.rs`)
+  on every `FAIL`, not just the restated clause text. (`crates/tpt-telos-verifier/src/verify.rs`,
+  `crates/tpt-telos-cli/src/main.rs`, `crates/tpt-telos-lsp/src/analysis.rs`)
 - [x] **Struct/enum definitions drive codegen** — replace the hardcoded-`i64`,
   usage-inferred `TypeFields` with real per-field types read from
   `StructDef`/`EnumDef`; add real Rust enum codegen and unit-only Go enum
   codegen (explicit error for payload-carrying enums in Go); IR cross-check
   rejects contracts referencing undeclared struct fields.
-  (`crates/telos-codegen/src/lib.rs`, `crates/telos-codegen/src/go.rs`,
-  `crates/telos-ir/src/extract.rs`)
+  (`crates/tpt-telos-codegen/src/lib.rs`, `crates/tpt-telos-codegen/src/go.rs`,
+  `crates/tpt-telos-ir/src/extract.rs`)
 - [x] **Bounded `forall`/aggregate unrolling** — add a bounded-range domain to
   the grammar (`forall i in lo..hi`, `sum/min/max/count(i in lo..hi)`);
   unroll to conjunctions/derived linear expressions at extract-time when
   bounds resolve to constants; reject non-constant-range quantifiers with a
-  specific error. (`crates/telos-parser/src/ast.rs`, `grammar.ebnf`,
-  `crates/telos-ir/src/extract.rs`)
+  specific error. (`crates/tpt-telos-parser/src/ast.rs`, `grammar.ebnf`,
+  `crates/tpt-telos-ir/src/extract.rs`)
 - [x] **General nested/compound `if`/`match` in contracts** — generalize DNF
   negation (De Morgan over `&&`/`||`/if-as-value/match-as-value) so
   `if`/`match` can appear as arithmetic sub-expressions, not just as the
-  whole clause. (`crates/telos-ir/src/extract.rs`)
+  whole clause. (`crates/tpt-telos-ir/src/extract.rs`)
 - [x] **`Call`/`MethodCall` verified via callee contracts** — modular
   (Dafny-style) verification: substitute callee `ensures` as premises at
   call sites; call-graph cycle detection rejects recursive contract
   references with a clear error rather than unsound fixed-depth unrolling.
-  (`crates/telos-ir/src/extract.rs`)
+  (`crates/tpt-telos-ir/src/extract.rs`)
 - [x] **Constant-index array/slice access in contracts** — unroll `Index`
   with a compile-time-constant index into fixed-size arrays; reject
   symbolic/non-constant indices with a specific error (full array theory is
-  out of scope). (`crates/telos-ir/src/extract.rs`)
+  out of scope). (`crates/tpt-telos-ir/src/extract.rs`)
 - [x] **Fix Go `Try` codegen stub and the `Stmt` silent-drop bug** — replace
   the literal `"_TODO"` sentinel with real `x, err := ...` / `(T, error)`
   codegen; fix `render_func_named`'s body loop silently dropping
   `Stmt::Let`/`If`/`Match`/`Return`; give Rust's own `Try` support a real
   `Result<...>` return type (currently never emitted).
-  (`crates/telos-codegen/src/go.rs`, `crates/telos-codegen/src/lib.rs`)
+  (`crates/tpt-telos-codegen/src/go.rs`, `crates/tpt-telos-codegen/src/lib.rs`)
 - [x] **`StaticAgent` synthesis extended to match** — synthesize `if`/`match`
   bodies for case-split `ensures`, loops for bounded `forall`/aggregate
   `ensures`, and direct calls for `Call`-referencing `ensures`; unhandled
   shapes still fail loudly via a specific `Err`, never a silent empty
-  candidate. (`crates/telos-agent/src/static_agent.rs`)
+  candidate. (`crates/tpt-telos-agent/src/static_agent.rs`)
 - [x] **Re-audit Phase 6's `[x]` claims** — spot-check "Disjunction (`||`) in
   premises," "Array and slice support," and "Z3/CVC5 optional backend" (the
   last already confirmed dead-wired: `--solver z3` sets a global the verifier
@@ -236,29 +236,29 @@ Phase 7 additions:
   of only when the whole group failed, causing `telos verify` to exit non-zero / print
   `RESULT: verification failed` even when every function's `all_passed` was true. Fixed to
   match `VerificationResult::all_passed` semantics (group fails only if no member passes).
-  (`crates/telos-cli/src/main.rs`)
+  (`crates/tpt-telos-cli/src/main.rs`)
 - [x] **Machine-readable `--json` output** — `--json` flag added to `telos verify`/`build`/
   `project` emitting `{file, passed, functions[{func_name, all_passed, checks[]}], proof_hash,
   ...}` so CI, editors, and the LSP can share one output format instead of each re-deriving
-  pass/fail independently. (`crates/telos-cli/src/main.rs`, `tests/cli.rs`)
+  pass/fail independently. (`crates/tpt-telos-cli/src/main.rs`, `tests/cli.rs`)
 - [x] **`telos init`/`new` scaffold** — `telos init [--module NAME] [--out PATH]` generates a
   starter module + invariant + func skeleton, to lower the barrier for first-time users.
-  (`crates/telos-cli/src/main.rs`, `tests/cli.rs`)
+  (`crates/tpt-telos-cli/src/main.rs`, `tests/cli.rs`)
 - [x] **Watch mode** — a `--watch` flag on `telos verify` polls the source file's mtime and
-  re-verifies on change, to tighten the edit-verify loop. (`crates/telos-cli/src/main.rs`)
+  re-verifies on change, to tighten the edit-verify loop. (`crates/tpt-telos-cli/src/main.rs`)
 - [x] **Feature-matrix CI job** — added a `feature-matrix` job to CI building/testing/linting
   with `--features llm` and `--features z3` separately so regressions behind those flags
   don't ship silently. (`.github/workflows/ci.yml`)
 - [x] **`telos verify-manifest` command** — `telos verify-manifest <manifest.json> <source>`
   re-hashes the source against a previously generated `telos-proof.json` and reports
   match/drift, making the existing cryptographic proof manifest (Phase 5) load-bearing for
-  tamper-evidence. (`crates/telos-codegen/src/proof.rs`, `crates/telos-cli/src/main.rs`,
+  tamper-evidence. (`crates/tpt-telos-codegen/src/proof.rs`, `crates/tpt-telos-cli/src/main.rs`,
   `tests/cli.rs`)
 - [x] **LSP quick-fix code actions** — `textDocument/codeAction` now returns a `quickfix`
   `CodeAction` per failing check with a counterexample, inserting a `requires !(...)` clause
   that excludes the concrete witness the solver found (a starting point, not a guaranteed
-  fix), advertised via `codeActionProvider: true`. (`crates/telos-lsp/src/analysis.rs`,
-  `crates/telos-lsp/src/lib.rs`)
+  fix), advertised via `codeActionProvider: true`. (`crates/tpt-telos-lsp/src/analysis.rs`,
+  `crates/tpt-telos-lsp/src/lib.rs`)
 
 ## Phase 9: Platform Review Backlog
 
@@ -271,29 +271,29 @@ Phase 7 additions:
 - [ ] **Fix `if`/`else` contract lowering unsoundness** — `to_constraints_dnf` accepts the `else`
   branch unconditionally instead of guarding it with `!cond`, so a function that always executes
   `else` can verify even when `cond` was true and `then` should have applied.
-  (`crates/telos-ir/src/extract.rs`, `Expr::If` arm)
+  (`crates/tpt-telos-ir/src/extract.rs`, `Expr::If` arm)
 - [ ] **Fix `match` contract lowering unsoundness** — same issue: each arm becomes an independent
   DNF branch with no premise tying it to the scrutinee matching that pattern.
-  (`crates/telos-ir/src/extract.rs`, `Expr::Match` arm)
+  (`crates/tpt-telos-ir/src/extract.rs`, `Expr::Match` arm)
 - [ ] **Fix nonlinear-bounding max-corner bug** — `linearize_bounded` always substitutes the
   single max corner value regardless of whether the surrounding relation needs an upper or lower
   bound, which can prove false facts or reject true ones depending on direction.
-  (`crates/telos-ir/src/extract.rs`, `linearize_bounded`)
+  (`crates/tpt-telos-ir/src/extract.rs`, `linearize_bounded`)
 - [ ] **Reject non-integer types at FFI boundaries** — `ffi.rs` hardcodes every scalar/field to
   `int64_t`/`i64`; floats/strings/bools/arrays/nested structs crossing an FFI-routed boundary are
-  silently coerced instead of rejected with a clear error. (`crates/telos-codegen/src/ffi.rs`)
+  silently coerced instead of rejected with a clear error. (`crates/tpt-telos-codegen/src/ffi.rs`)
 - [ ] **Diagnose `real_time`/`zero_allocation` routed to Python** — `RoutingDiagnostic` only
   checks Go-target conflicts; a module tagged `@boundary(real_time, ml_training)` silently routes
-  to Python (GC + interpreter) with no warning. (`crates/telos-router/src/lib.rs`)
+  to Python (GC + interpreter) with no warning. (`crates/tpt-telos-router/src/lib.rs`)
 - [ ] **Warn on unrecognized `@state(...)` values** — typos like `@state(persistant)` silently
-  fall back to `Ephemeral` with no diagnostic. (`crates/telos-router/src/lib.rs`)
+  fall back to `Ephemeral` with no diagnostic. (`crates/tpt-telos-router/src/lib.rs`)
 - [ ] **`StaticAgent`: handle inequality-only `ensures`** — currently only `==`, `if`/`match`
   splits, and direct calls synthesize a body; a pure inequality postcondition (e.g.
   `ensures balance >= 0`) silently produces an empty body instead of a reasonable first attempt.
-  (`crates/telos-agent/src/static_agent.rs`)
+  (`crates/tpt-telos-agent/src/static_agent.rs`)
 - [ ] **`eject --func <name>`: error on unmatched function name** — if the requested name doesn't
   exist but a different function has `@eject`, that other function is silently ejected instead of
-  reporting "function not found." (`crates/telos-cli/src/main.rs`)
+  reporting "function not found." (`crates/tpt-telos-cli/src/main.rs`)
 
 ### Documentation integrity
 - [ ] Fix Phase 8's intro line (says most items are "proposed follow-ups, not yet implemented"
@@ -323,7 +323,7 @@ Phase 7 additions:
 - [x] Build a minimal VS Code extension: syntax highlighting (TextMate grammar) + LSP client wiring
   (`vscode-languageclient`) against the existing `telos lsp` server. (`vscode-telos/`)
 - [x] Extend the LSP server: `textDocument/formatting` (reuse the existing pretty-printer).
-  (`crates/telos-lsp/src/lib.rs`) `textDocument/definition`/`references` and `textDocument/completion`
+  (`crates/tpt-telos-lsp/src/lib.rs`) `textDocument/definition`/`references` and `textDocument/completion`
   remain open (need a workspace-wide symbol index).
 
 ### Release & contribution infra
@@ -338,4 +338,4 @@ Phase 7 additions:
 ### Innovation
 - [x] Prototype a WASM build of `telos-parser` + `telos-verifier` (both dependency-light; default
   solver path needs no external Z3) for a browser-based playground — zero-install trial for new users.
-  (`crates/telos-wasm/`)
+  (`crates/tpt-telos-wasm/`)

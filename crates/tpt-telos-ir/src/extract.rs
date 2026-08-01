@@ -205,13 +205,42 @@ fn linearize_bounded(
         Expr::Int(n) => Ok(Linear::constant_only(*n)),
         Expr::Var(name) => Ok(Linear::var(&var_fn(name))),
         Expr::Field { base, field } => Ok(Linear::var(&field_fn(base, field))),
-        Expr::Old(e) => linearize_bounded(e, &|b, f| pre_field(b, f), var_fn, bounds, approximated, prefer_min_corner),
+        Expr::Old(e) => linearize_bounded(
+            e,
+            &|b, f| pre_field(b, f),
+            var_fn,
+            bounds,
+            approximated,
+            prefer_min_corner,
+        ),
         Expr::Unary { op, expr } => match op {
-            UnOp::Neg => Ok(linearize_bounded(expr, field_fn, var_fn, bounds, approximated, prefer_min_corner)?.neg()),
+            UnOp::Neg => Ok(linearize_bounded(
+                expr,
+                field_fn,
+                var_fn,
+                bounds,
+                approximated,
+                prefer_min_corner,
+            )?
+            .neg()),
         },
         Expr::Bin { op, lhs, rhs } => {
-            let l = linearize_bounded(lhs, field_fn, var_fn, bounds, approximated, prefer_min_corner)?;
-            let r = linearize_bounded(rhs, field_fn, var_fn, bounds, approximated, prefer_min_corner)?;
+            let l = linearize_bounded(
+                lhs,
+                field_fn,
+                var_fn,
+                bounds,
+                approximated,
+                prefer_min_corner,
+            )?;
+            let r = linearize_bounded(
+                rhs,
+                field_fn,
+                var_fn,
+                bounds,
+                approximated,
+                prefer_min_corner,
+            )?;
             match op {
                 BinOp::Add => Ok(l.add(&r)),
                 BinOp::Sub => Ok(l.sub(&r)),
@@ -362,8 +391,10 @@ fn to_constraints_bounded_dnf(
                 // regardless of the relation direction: for `>=`, the binding check is
                 // the min-corner; for `<=`, the binding check is the max-corner.
                 let mut approx_min = false;
-                let l_min = linearize_bounded(lhs, field_fn, var_fn, bounds, &mut approx_min, true)?;
-                let r_min = linearize_bounded(rhs, field_fn, var_fn, bounds, &mut approx_min, true)?;
+                let l_min =
+                    linearize_bounded(lhs, field_fn, var_fn, bounds, &mut approx_min, true)?;
+                let r_min =
+                    linearize_bounded(rhs, field_fn, var_fn, bounds, &mut approx_min, true)?;
                 let diff_min = l_min.sub(&r_min);
                 *approximated = true;
                 Ok(vec![vec![

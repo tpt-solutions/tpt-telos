@@ -18,13 +18,13 @@ name = "telos"
 path = "src/main.rs"
 
 [dependencies]
-tpt-telos-parser = { path = "../telos-parser", version = "0.1.1" }
-tpt-telos-ir = { path = "../telos-ir", version = "0.1.1" }
-tpt-telos-verifier = { path = "../telos-verifier", version = "0.1.1" }
-tpt-telos-router = { path = "../telos-router", version = "0.1.1" }
-tpt-telos-agent = { path = "../telos-agent", version = "0.1.1" }
-tpt-telos-codegen = { path = "../telos-codegen", version = "0.1.1" }
-tpt-telos-lsp = { path = "../telos-lsp", version = "0.1.1" }
+tpt-telos-parser = { path = "../tpt-telos-parser", version = "0.1.1" }
+tpt-telos-ir = { path = "../tpt-telos-ir", version = "0.1.1" }
+tpt-telos-verifier = { path = "../tpt-telos-verifier", version = "0.1.1" }
+tpt-telos-router = { path = "../tpt-telos-router", version = "0.1.1" }
+tpt-telos-agent = { path = "../tpt-telos-agent", version = "0.1.1" }
+tpt-telos-codegen = { path = "../tpt-telos-codegen", version = "0.1.1" }
+tpt-telos-lsp = { path = "../tpt-telos-lsp", version = "0.1.1" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 serde = { version = "1", features = ["derive"] }

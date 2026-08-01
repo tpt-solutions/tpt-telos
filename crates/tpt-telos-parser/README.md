@@ -12,7 +12,7 @@ hand-written lexer and recursive-descent parser with no external parser-generato
 AST node types are re-exported at the crate root for convenience.
 
 The authoritative grammar lives at
-[`src/grammar.ebnf`](https://github.com/tpt-solutions/tpt-telos/blob/master/crates/telos-parser/src/grammar.ebnf).
+[`src/grammar.ebnf`](https://github.com/tpt-solutions/tpt-telos/blob/master/crates/tpt-telos-parser/src/grammar.ebnf).
 
 ## Usage
 

@@ -18,10 +18,10 @@ description = "Agentic transpiler backend for tpt-telos (StaticAgent + LLM agent
 llm = ["ureq", "serde_json"]
 
 [dependencies]
-tpt-telos-parser = { path = "../telos-parser", version = "0.1.1" }
-tpt-telos-ir = { path = "../telos-ir", version = "0.1.1" }
-tpt-telos-verifier = { path = "../telos-verifier", version = "0.1.1" }
-tpt-telos-router = { path = "../telos-router", version = "0.1.1" }
+tpt-telos-parser = { path = "../tpt-telos-parser", version = "0.1.1" }
+tpt-telos-ir = { path = "../tpt-telos-ir", version = "0.1.1" }
+tpt-telos-verifier = { path = "../tpt-telos-verifier", version = "0.1.1" }
+tpt-telos-router = { path = "../tpt-telos-router", version = "0.1.1" }
 ureq = { version = "2", features = ["json"], optional = true }
 serde_json = { version = "1", optional = true }
 

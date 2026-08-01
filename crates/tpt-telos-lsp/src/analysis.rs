@@ -578,7 +578,11 @@ fn render_item(item: &Item) -> String {
                 .iter()
                 .map(|f| format!("{}: {}", f.name, render_type(&f.ty)))
                 .collect();
-            format!("struct {} {{\n{}\n}}", s.name, fmt_indent(&fields.join(",\n")))
+            format!(
+                "struct {} {{\n{}\n}}",
+                s.name,
+                fmt_indent(&fields.join(",\n"))
+            )
         }
         Item::Enum(e) => {
             let variants: Vec<_> = e
@@ -597,7 +601,11 @@ fn render_item(item: &Item) -> String {
                     }
                 })
                 .collect();
-            format!("enum {} {{\n{}\n}}", e.name, fmt_indent(&variants.join(",\n")))
+            format!(
+                "enum {} {{\n{}\n}}",
+                e.name,
+                fmt_indent(&variants.join(",\n"))
+            )
         }
     }
 }

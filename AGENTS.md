@@ -12,7 +12,7 @@ Rust Cargo workspace. The `telos` binary (crate `tpt-telos`) is the compiler fro
 CI sets `RUSTFLAGS=-D warnings`, so keep the build warning-clean locally too — a warning breaks CI.
 
 ## Architecture (pipeline order)
-`tpt-telos-parser` (grammar of record: `crates/telos-parser/src/grammar.ebnf`) → `tpt-telos-ir` (AST→IR, `requires`/`ensures`→QF_LRA) → `tpt-telos-verifier` (self-contained Fourier–Motzkin SMT-style solver, sound over integers, **no external Z3 dependency** — do not add one) → `tpt-telos-agent` (agentic transpiler) → `tpt-telos-router` (Rust/Go selection) → `tpt-telos-codegen` (Rust + Go backends, FFI bridge, eject) → `tpt-telos-lsp`.
+`tpt-telos-parser` (grammar of record: `crates/tpt-telos-parser/src/grammar.ebnf`) → `tpt-telos-ir` (AST→IR, `requires`/`ensures`→QF_LRA) → `tpt-telos-verifier` (self-contained Fourier–Motzkin SMT-style solver, sound over integers, **no external Z3 dependency** — do not add one) → `tpt-telos-agent` (agentic transpiler) → `tpt-telos-router` (Rust/Go selection) → `tpt-telos-codegen` (Rust + Go backends, FFI bridge, eject) → `tpt-telos-lsp`.
 
 The CLI needs no network by default: the offline `StaticAgent` runs unless `--llm` is passed.
 

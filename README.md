@@ -19,7 +19,7 @@ build or run.
 > **Status:** v1.2, Phase 7 and Phase 8 complete (see [`TODO.md`](TODO.md)).
 > Counterexamples are surfaced by `telos verify`/`build` and the LSP; structs,
 > enums, bounded `forall`/aggregates, disjunction, and modular `Call`/
-> `MethodCall` verification are all wired into `telos-ir`/`telos-codegen`.
+> `MethodCall` verification are all wired into `tpt-telos-ir`/`tpt-telos-codegen`.
 
 ## Install
 
@@ -125,10 +125,11 @@ verifier ≈ verifier, agent+router+codegen ≈ ai-orchestrator.
 
 ## Crate documentation
 
-Individual crate READMEs have not yet been written; the table in the [Crates](#crates)
-section above is the authoritative per-crate summary. The source-of-truth for the
-grammar is `crates/telos-parser/src/grammar.ebnf`; for the full feature and phase
-history see [`TODO.md`](TODO.md); for example `.telos` files see [`examples/README.md`](examples/README.md).
+Every crate under `crates/` has its own README with usage details specific to that
+crate; the table in the [Crates](#crates) section above is a quick-reference summary,
+not a substitute. The source-of-truth for the grammar is
+`crates/tpt-telos-parser/src/grammar.ebnf`; for the full feature and phase history see
+[`TODO.md`](TODO.md); for example `.telos` files see [`examples/README.md`](examples/README.md).
 
 ## Troubleshooting
 

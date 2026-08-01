@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/telos-parser",
-    "crates/telos-ir",
-    "crates/telos-verifier",
-    "crates/telos-router",
-    "crates/telos-agent",
-    "crates/telos-codegen",
-    "crates/telos-lsp",
-    "crates/telos-cli",
-    "crates/telos-wasm",
+    "crates/tpt-telos-parser",
+    "crates/tpt-telos-ir",
+    "crates/tpt-telos-verifier",
+    "crates/tpt-telos-router",
+    "crates/tpt-telos-agent",
+    "crates/tpt-telos-codegen",
+    "crates/tpt-telos-lsp",
+    "crates/tpt-telos-cli",
+    "crates/tpt-telos-wasm",
 ]
 
 [workspace.package]

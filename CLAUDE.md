@@ -58,7 +58,7 @@ with an enforced 75% line-coverage floor.
 Eight crates under `crates/`, each with a focused responsibility in the pipeline:
 
 - **tpt-telos-parser** — hand-written lexer/parser/AST for `.telos` source. Grammar is the source of truth
-  at `crates/telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
+  at `crates/tpt-telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
   the language changes. The AST also covers generics, tuples, `struct`/`enum` definitions, calls,
   and control-flow expressions (`if`/`match`/`forall`/aggregates/`?`) — as of Phase 7 these are fully
   lowered by `tpt-telos-ir`/`tpt-telos-codegen` too, not just parsed (see Phase 7 in `TODO.md`).

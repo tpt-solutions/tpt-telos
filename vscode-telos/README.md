@@ -17,7 +17,7 @@ The `telos` binary must be available on your PATH (or configured via `telos.serv
 Build it from source:
 
 ```sh
-cargo install --path crates/telos-cli
+cargo install --path crates/tpt-telos-cli
 ```
 
 Or use the pre-built binary from the project releases.

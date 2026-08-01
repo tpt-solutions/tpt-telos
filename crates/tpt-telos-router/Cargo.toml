@@ -14,4 +14,4 @@ categories = ["compilers", "development-tools"]
 description = "Context router that classifies tpt-telos modules to Rust or Go backends"
 
 [dependencies]
-tpt-telos-parser = { path = "../telos-parser", version = "0.1.1" }
+tpt-telos-parser = { path = "../tpt-telos-parser", version = "0.1.1" }

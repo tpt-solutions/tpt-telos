@@ -15,7 +15,7 @@ cargo install wasm-pack
 ## Building
 
 ```sh
-wasm-pack build crates/telos-wasm --target web
+wasm-pack build crates/tpt-telos-wasm --target web
 ```
 
 This produces a `pkg/` directory containing the generated JavaScript bindings and the `.wasm` file,
