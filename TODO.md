@@ -338,4 +338,4 @@ Phase 7 additions:
 ### Innovation
 - [x] Prototype a WASM build of `telos-parser` + `telos-verifier` (both dependency-light; default
   solver path needs no external Z3) for a browser-based playground — zero-install trial for new users.
-  (`crates/tpt-telos-wasm/`)
+  (`crates/out-telos-wasm/`)

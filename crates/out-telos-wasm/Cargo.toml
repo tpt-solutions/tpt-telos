@@ -1,5 +1,5 @@
 [package]
-name = "tpt-telos-wasm"
+name = "out-telos-wasm"
 version = "0.1.0"
 edition = "2021"
 description = "WASM bindings for the tpt-telos parser and verifier (browser playground)"

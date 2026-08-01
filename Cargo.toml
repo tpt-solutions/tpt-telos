@@ -9,7 +9,7 @@ members = [
     "crates/tpt-telos-codegen",
     "crates/tpt-telos-lsp",
     "crates/tpt-telos-cli",
-    "crates/tpt-telos-wasm",
+    "crates/out-telos-wasm",
 ]
 
 [workspace.package]

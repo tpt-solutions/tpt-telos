@@ -1,4 +1,4 @@
-# tpt-telos-wasm
+# out-telos-wasm
 
 WASM bindings for the `tpt-telos-parser` and `tpt-telos-verifier` crates, intended for use in a
 zero-install browser-based playground where users can type `.telos` source and see verification
@@ -15,7 +15,7 @@ cargo install wasm-pack
 ## Building
 
 ```sh
-wasm-pack build crates/tpt-telos-wasm --target web
+wasm-pack build crates/out-telos-wasm --target web
 ```
 
 This produces a `pkg/` directory containing the generated JavaScript bindings and the `.wasm` file,

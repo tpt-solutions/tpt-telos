@@ -61,7 +61,7 @@ jobs:
           path: lcov.info
 
   wasm:
-    name: WASM build (telos-wasm)
+    name: WASM build (out-telos-wasm)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -75,7 +75,7 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM
-        run: wasm-pack build crates/tpt-telos-wasm --target web
+        run: wasm-pack build crates/out-telos-wasm --target web
 
   feature-matrix:
     name: Feature matrix (${{ matrix.features }})
