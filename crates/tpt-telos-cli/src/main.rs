@@ -101,6 +101,10 @@ enum Command {
         /// Emit machine-readable JSON instead of human-readable text.
         #[arg(long)]
         json: bool,
+        /// Re-run the build automatically when the source file (or any .telos
+        /// file in its directory) changes.
+        #[arg(long)]
+        watch: bool,
     },
     /// Generate a dual-backend project (Rust + Go) with an automatic FFI bridge.
     Project {
@@ -123,6 +127,10 @@ enum Command {
         /// Emit machine-readable JSON instead of human-readable text.
         #[arg(long)]
         json: bool,
+        /// Re-run the project generation/check automatically when the source
+        /// file (or any .telos file in its directory) changes.
+        #[arg(long)]
+        watch: bool,
     },
     /// Eject functions to raw Rust/Go opaque blocks guarded by their contracts.
     Eject {
@@ -213,7 +221,8 @@ fn main() -> ExitCode {
             llm,
             solver,
             json,
-        } => match run_build(&file, &out_dir, llm, &solver, json) {
+            watch,
+        } => match run_build(&file, &out_dir, llm, &solver, json, watch) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -233,7 +242,8 @@ fn main() -> ExitCode {
             check,
             strict_rt,
             json,
-        } => match run_project(&file, &out_dir, llm, check, strict_rt, json) {
+            watch,
+        } => match run_project(&file, &out_dir, llm, check, strict_rt, json, watch) {
             Ok(passed) => {
                 if passed {
                     ExitCode::SUCCESS
@@ -286,6 +296,111 @@ fn main() -> ExitCode {
 fn load_modules(file: &str) -> Result<Vec<Module>, String> {
     let src = fs::read_to_string(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     parse(&src)
+}
+
+// ---------------------------------------------------------------------------
+// Colorized / rustc-style diagnostic output
+// ---------------------------------------------------------------------------
+
+const RESET: &str = "\x1b[0m";
+const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const CYAN: &str = "\x1b[36m";
+
+/// Whether to emit ANSI colors. Honors `NO_COLOR` and disables color when
+/// stdout is not a terminal (so piped / file output stays plain text).
+fn use_color() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    std::io::IsTerminal::is_terminal(&std::io::stdout())
+}
+
+/// Wrap `s` in an ANSI color escape when `enabled`, otherwise return it untouched.
+fn paint(enabled: bool, color: &str, s: &str) -> String {
+    if enabled {
+        format!("{}{}{}", color, s, RESET)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Print a rustc-style source annotation (`--> file:line:col`, the offending
+/// line, and a caret) for a failed check's source span `(line, column)`.
+fn emit_caret(enabled: bool, file: &str, lines: &[&str], span: (usize, usize)) {
+    let (line, col) = span;
+    if line == 0 || line > lines.len() {
+        return;
+    }
+    let src_line = lines[line - 1];
+    let w = line.to_string().len();
+    println!("{} {}:{}:{}", paint(enabled, CYAN, "-->"), file, line, col);
+    println!("{} |", " ".repeat(w));
+    println!("{:>width$} | {}", line, src_line, width = w);
+    let pad = " ".repeat(col.saturating_sub(1));
+    println!("{} | {}{}", " ".repeat(w), pad, paint(enabled, RED, "^"));
+}
+
+/// Latest modification time among `.telos` files in `dir`, used by watch mode
+/// to detect changes across the whole directory (not just the entry file).
+fn latest_telos_mtime(dir: &std::path::Path) -> Option<std::time::SystemTime> {
+    let mut max: Option<std::time::SystemTime> = None;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("telos") {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(m) = meta.modified() {
+                        max = Some(match max {
+                            Some(cur) => cur.max(m),
+                            None => m,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    max
+}
+
+/// Poll `file`'s directory for `.telos` changes and re-run `run` on each
+/// change after a short debounce window. Runs `run` once before entering the
+/// watch loop so the initial result is reported immediately.
+fn watch_loop<F>(file: &str, run: F) -> Result<bool, String>
+where
+    F: Fn() -> Result<bool, String>,
+{
+    let dir = std::path::Path::new(file)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut last_modified = latest_telos_mtime(&dir);
+    // Initial run; surface any fatal error before entering the watch loop.
+    run()?;
+    eprintln!("Watching {} for changes (Ctrl+C to stop)...", dir.display());
+    // Track when the directory last became stable so we only re-run after the
+    // source has stopped changing for the debounce window (avoids re-running
+    // on every keystroke of a multi-file save).
+    let mut stable_since: Option<std::time::Instant> = None;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let current = latest_telos_mtime(&dir);
+        if current != last_modified {
+            last_modified = current;
+            stable_since = Some(std::time::Instant::now());
+            continue;
+        }
+        if let Some(since) = stable_since {
+            if since.elapsed() >= std::time::Duration::from_millis(400) {
+                stable_since = None;
+                println!("\n--- change detected, re-running ---\n");
+                if let Err(e) = run() {
+                    eprintln!("error: {e}");
+                }
+            }
+        }
+    }
 }
 
 /// Canonicalise generated Go with `gofmt -w`. Go's printer tightens operator
@@ -466,6 +581,12 @@ fn run_parse(file: &str, json: bool) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
+struct JsonLocation {
+    line: usize,
+    column: usize,
+}
+
+#[derive(Serialize)]
 struct JsonCheck {
     description: String,
     passed: bool,
@@ -473,6 +594,7 @@ struct JsonCheck {
     is_approximation: bool,
     counterexample: Option<std::collections::HashMap<String, i64>>,
     or_group: Option<usize>,
+    location: Option<JsonLocation>,
 }
 
 #[derive(Serialize)]
@@ -566,6 +688,9 @@ fn collect_verify_output(
                 is_approximation: c.is_approximation,
                 counterexample: c.counterexample.clone(),
                 or_group: c.or_group,
+                location: c
+                    .location
+                    .map(|(line, col)| JsonLocation { line, column: col }),
             })
             .collect();
         if !result.all_passed {
@@ -604,6 +729,8 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
         other => return Err(format!("unknown solver backend: `{other}`")),
     }
 
+    let color = use_color();
+
     let run_once = |json_mode: bool| -> Result<bool, String> {
         let modules = load_modules(file)?;
         let problems = tpt_telos_ir::extract(&modules)?;
@@ -622,6 +749,9 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
             return Ok(overall);
         }
+
+        let src = fs::read_to_string(file).unwrap_or_default();
+        let lines: Vec<&str> = src.lines().collect();
 
         let mut overall = true;
         println!("Verifying {}\n", file);
@@ -643,12 +773,16 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
             }
 
             for check in &independent {
-                let tag = if check.passed { "PASS" } else { "FAIL" };
+                let tag = if check.passed {
+                    paint(color, GREEN, "PASS")
+                } else {
+                    paint(color, RED, "FAIL")
+                };
                 let kind = if check.is_ensures { "ensures " } else { "" };
                 let approx = if check.is_approximation {
-                    " [interval-bounded]"
+                    paint(color, YELLOW, " [interval-bounded]")
                 } else {
-                    ""
+                    String::new()
                 };
                 println!("    [{}] {}{}{}", tag, kind, check.description, approx);
                 if !check.passed {
@@ -658,6 +792,9 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
                             ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
                         println!("      counterexample: {{{}}}", bindings.join(", "));
                     }
+                    if let Some(loc) = check.location {
+                        emit_caret(color, file, &lines, loc);
+                    }
                 }
             }
 
@@ -666,15 +803,23 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
             for gk in group_keys {
                 let members = &groups[&gk];
                 let group_any_passed = members.iter().any(|c| c.passed);
-                let group_tag = if group_any_passed { "PASS" } else { "FAIL" };
+                let group_tag = if group_any_passed {
+                    paint(color, GREEN, "PASS")
+                } else {
+                    paint(color, RED, "FAIL")
+                };
                 println!("    [{}] disjunction group {}:", group_tag, gk);
                 for check in members {
-                    let tag = if check.passed { "PASS" } else { "FAIL" };
+                    let tag = if check.passed {
+                        paint(color, GREEN, "PASS")
+                    } else {
+                        paint(color, RED, "FAIL")
+                    };
                     let kind = if check.is_ensures { "ensures " } else { "" };
                     let approx = if check.is_approximation {
-                        " [interval-bounded]"
+                        paint(color, YELLOW, " [interval-bounded]")
                     } else {
-                        ""
+                        String::new()
                     };
                     println!("      [{}] {}{}{}", tag, kind, check.description, approx);
                     if !check.passed {
@@ -683,6 +828,9 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
                                 ce.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
                             println!("        counterexample: {{{}}}", bindings.join(", "));
                         }
+                        if let Some(loc) = check.location {
+                            emit_caret(color, file, &lines, loc);
+                        }
                     }
                 }
                 if !group_any_passed {
@@ -690,17 +838,32 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
                 }
             }
 
-            let status = if result.all_passed { "PASS" } else { "FAIL" };
+            let status = if result.all_passed {
+                paint(color, GREEN, "PASS")
+            } else {
+                paint(color, RED, "FAIL")
+            };
             println!("    => {}\n", status);
         }
 
         if overall {
-            println!("RESULT: all constraints satisfied.");
-        } else {
-            println!("RESULT: verification failed (see FAIL above).");
             println!(
-                "\nhint: some failures may be solver limitations (FM solver is incomplete \
-                 for nonlinear arithmetic); try --solver z3 for exact results"
+                "{}",
+                paint(color, GREEN, "RESULT: all constraints satisfied.")
+            );
+        } else {
+            println!(
+                "{}",
+                paint(color, RED, "RESULT: verification failed (see FAIL above).")
+            );
+            println!(
+                "\n{}",
+                paint(
+                    color,
+                    YELLOW,
+                    "hint: some failures may be solver limitations (FM solver is incomplete \
+                     for nonlinear arithmetic); try --solver z3 for exact results"
+                )
             );
         }
         Ok(overall)
@@ -710,19 +873,9 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
         return run_once(json);
     }
 
-    // Watch mode: poll the file's mtime and re-verify on change.
-    let mut last_modified = std::fs::metadata(file).and_then(|m| m.modified()).ok();
-    let _overall = run_once(false)?;
-    eprintln!("Watching {file} for changes (Ctrl+C to stop)...");
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let current_modified = std::fs::metadata(file).and_then(|m| m.modified()).ok();
-        if current_modified != last_modified {
-            last_modified = current_modified;
-            println!("\n--- file changed, re-verifying ---\n");
-            let _ = run_once(false)?;
-        }
-    }
+    // Watch mode: re-verify on any `.telos` change in the file's directory,
+    // after a short debounce window so multi-file saves re-run once.
+    watch_loop(file, || run_once(false))
 }
 
 fn make_agent(llm: bool) -> Result<Box<dyn tpt_telos_agent::CodeAgent>, String> {
@@ -810,118 +963,130 @@ fn run_build(
     llm: bool,
     solver: &str,
     json: bool,
+    watch: bool,
 ) -> Result<bool, String> {
-    // Configure solver backend (same logic as run_verify).
-    match solver {
-        "fourier-motzkin" => {}
-        "z3" => {
-            #[cfg(feature = "z3")]
-            {
-                if !tpt_telos_verifier::z3_solver::is_z3_available() {
-                    eprintln!("warning: Z3 not found at runtime; falling back to Fourier-Motzkin");
-                } else {
-                    tpt_telos_verifier::set_solver_backend(tpt_telos_verifier::SolverBackend::Z3);
+    let run_once = || -> Result<bool, String> {
+        // Configure solver backend (same logic as run_verify).
+        match solver {
+            "fourier-motzkin" => {}
+            "z3" => {
+                #[cfg(feature = "z3")]
+                {
+                    if !tpt_telos_verifier::z3_solver::is_z3_available() {
+                        eprintln!(
+                            "warning: Z3 not found at runtime; falling back to Fourier-Motzkin"
+                        );
+                    } else {
+                        tpt_telos_verifier::set_solver_backend(
+                            tpt_telos_verifier::SolverBackend::Z3,
+                        );
+                    }
+                }
+                #[cfg(not(feature = "z3"))]
+                {
+                    eprintln!(
+                        "warning: Z3 solver requires building with `--features z3`; \
+                     falling back to Fourier-Motzkin"
+                    );
                 }
             }
-            #[cfg(not(feature = "z3"))]
-            {
-                eprintln!(
-                    "warning: Z3 solver requires building with `--features z3`; \
-                     falling back to Fourier-Motzkin"
-                );
+            other => return Err(format!("unknown solver backend: `{other}`")),
+        }
+
+        let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
+        let modules = load_modules(file)?;
+        let agent = make_agent(llm)?;
+
+        let mut outcomes = Vec::new();
+        let mut all_verified = true;
+        for m in &modules {
+            for o in transpile_module(m, agent.as_ref())? {
+                if !o.verified {
+                    all_verified = false;
+                }
+                outcomes.push(o);
             }
         }
-        other => return Err(format!("unknown solver backend: `{other}`")),
-    }
 
-    let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
-    let modules = load_modules(file)?;
-    let agent = make_agent(llm)?;
+        // Generate proof manifest before appending the static to the Rust source.
+        let manifest = proof::generate_manifest(&src_bytes, &outcomes);
+        let proof_static = proof::render_rust_proof_static(&manifest);
 
-    let mut outcomes = Vec::new();
-    let mut all_verified = true;
-    for m in &modules {
-        for o in transpile_module(m, agent.as_ref())? {
-            if !o.verified {
-                all_verified = false;
-            }
-            outcomes.push(o);
-        }
-    }
+        let mut rust = generate_program(&modules, &outcomes);
+        rust.push_str(&proof_static);
 
-    // Generate proof manifest before appending the static to the Rust source.
-    let manifest = proof::generate_manifest(&src_bytes, &outcomes);
-    let proof_static = proof::render_rust_proof_static(&manifest);
-
-    let mut rust = generate_program(&modules, &outcomes);
-    rust.push_str(&proof_static);
-
-    let crate_dir = std::path::Path::new(out_dir);
-    fs::create_dir_all(crate_dir.join("src"))
-        .map_err(|e| format!("cannot create {out_dir}: {e}"))?;
-    fs::write(crate_dir.join("src/lib.rs"), &rust)
-        .map_err(|e| format!("cannot write lib.rs: {e}"))?;
-    fs::write(
-        crate_dir.join("Cargo.toml"),
-        "[package]\nname = \"generated\"\nversion = \"0.1.0\"\n\
+        let crate_dir = std::path::Path::new(out_dir);
+        fs::create_dir_all(crate_dir.join("src"))
+            .map_err(|e| format!("cannot create {out_dir}: {e}"))?;
+        fs::write(crate_dir.join("src/lib.rs"), &rust)
+            .map_err(|e| format!("cannot write lib.rs: {e}"))?;
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname = \"generated\"\nversion = \"0.1.0\"\n\
          edition = \"2021\"\n\n[dependencies]\n\n[workspace]\n",
-    )
-    .map_err(|e| format!("cannot write Cargo.toml: {e}"))?;
+        )
+        .map_err(|e| format!("cannot write Cargo.toml: {e}"))?;
 
-    // Write proof manifest alongside generated code.
-    let proof_json = proof::to_json(&manifest);
-    fs::write(crate_dir.join("telos-proof.json"), &proof_json)
-        .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
+        // Write proof manifest alongside generated code.
+        let proof_json = proof::to_json(&manifest);
+        fs::write(crate_dir.join("telos-proof.json"), &proof_json)
+            .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
 
-    // Compile the generated crate.
-    let status = std::process::Command::new("cargo")
-        .arg("build")
-        .arg("--manifest-path")
-        .arg(crate_dir.join("Cargo.toml"))
-        .status();
+        // Compile the generated crate.
+        let status = std::process::Command::new("cargo")
+            .arg("build")
+            .arg("--manifest-path")
+            .arg(crate_dir.join("Cargo.toml"))
+            .status();
 
-    let compile_ok = match &status {
-        Ok(s) => s.success(),
-        Err(_) => false,
-    };
-
-    if json {
-        let problems = tpt_telos_ir::extract(&modules)?;
-        let (functions, _) = collect_verify_output(&problems);
-        let output = JsonBuildOutput {
-            file: file.to_string(),
-            passed: all_verified && compile_ok,
-            out_dir: out_dir.to_string(),
-            functions,
-            proof_hash: Some(manifest.manifest_hash.clone()),
+        let compile_ok = match &status {
+            Ok(s) => s.success(),
+            Err(_) => false,
         };
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
-        if !compile_ok {
-            return Err("generated Rust failed to compile".into());
-        }
-        return Ok(all_verified);
-    }
 
-    println!("Generated crate written to {out_dir}/");
-    println!("Proof manifest written → {out_dir}/telos-proof.json");
-    if !all_verified {
-        println!("WARNING: some functions were not mathematically verified.");
-    }
+        if json {
+            let problems = tpt_telos_ir::extract(&modules)?;
+            let (functions, _) = collect_verify_output(&problems);
+            let output = JsonBuildOutput {
+                file: file.to_string(),
+                passed: all_verified && compile_ok,
+                out_dir: out_dir.to_string(),
+                functions,
+                proof_hash: Some(manifest.manifest_hash.clone()),
+            };
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            if !compile_ok {
+                return Err("generated Rust failed to compile".into());
+            }
+            return Ok(all_verified);
+        }
 
-    println!("Compiling generated Rust with cargo...\n");
-    match status {
-        Ok(s) if s.success() => {
-            println!("\nBUILD: generated Rust compiles successfully.");
-            Ok(all_verified)
+        println!("Generated crate written to {out_dir}/");
+        println!("Proof manifest written → {out_dir}/telos-proof.json");
+        if !all_verified {
+            println!("WARNING: some functions were not mathematically verified.");
         }
-        Ok(s) => {
-            eprintln!("\nBUILD: cargo exited with {s}");
-            Err("generated Rust failed to compile".into())
-        }
-        Err(e) => Err(format!(
-            "could not invoke cargo (is it on PATH?): {e}. \
+
+        println!("Compiling generated Rust with cargo...\n");
+        match status {
+            Ok(s) if s.success() => {
+                println!("\nBUILD: generated Rust compiles successfully.");
+                Ok(all_verified)
+            }
+            Ok(s) => {
+                eprintln!("\nBUILD: cargo exited with {s}");
+                Err("generated Rust failed to compile".into())
+            }
+            Err(e) => Err(format!(
+                "could not invoke cargo (is it on PATH?): {e}. \
              The generated Rust was still written to {out_dir}/.",
-        )),
+            )),
+        }
+    };
+    if !watch {
+        run_once()
+    } else {
+        watch_loop(file, run_once)
     }
 }
 
@@ -932,192 +1097,200 @@ fn run_project(
     check: bool,
     strict_rt: bool,
     json: bool,
+    watch: bool,
 ) -> Result<bool, String> {
-    let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
-    let modules = load_modules(file)?;
-    let agent = make_agent(llm)?;
+    let run_once = || -> Result<bool, String> {
+        let src_bytes = fs::read(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
+        let modules = load_modules(file)?;
+        let agent = make_agent(llm)?;
 
-    let mut outcomes = Vec::new();
-    let mut all_verified = true;
-    for m in &modules {
-        let _target = tpt_telos_router::route(&m.attributes).target;
-        for o in transpile_module(m, agent.as_ref())? {
-            if !o.verified {
-                all_verified = false;
+        let mut outcomes = Vec::new();
+        let mut all_verified = true;
+        for m in &modules {
+            let _target = tpt_telos_router::route(&m.attributes).target;
+            for o in transpile_module(m, agent.as_ref())? {
+                if !o.verified {
+                    all_verified = false;
+                }
+                outcomes.push(o);
             }
-            outcomes.push(o);
         }
-    }
 
-    let project = generate_project(&modules, &outcomes)?;
+        let project = generate_project(&modules, &outcomes)?;
 
-    // --strict-rt: promote routing conflicts to hard errors.
-    if strict_rt {
-        let has_conflict = project.diagnostics.iter().any(|d| {
-            d.kind == tpt_telos_router::DiagnosticKind::RealTimeGoConflict
-                || d.kind == tpt_telos_router::DiagnosticKind::ZeroAllocGoConflict
-        });
-        if has_conflict {
-            return Err(
-                "strict-rt: routing conflict detected (real_time/zero_allocation \
+        // --strict-rt: promote routing conflicts to hard errors.
+        if strict_rt {
+            let has_conflict = project.diagnostics.iter().any(|d| {
+                d.kind == tpt_telos_router::DiagnosticKind::RealTimeGoConflict
+                    || d.kind == tpt_telos_router::DiagnosticKind::ZeroAllocGoConflict
+            });
+            if has_conflict {
+                return Err(
+                    "strict-rt: routing conflict detected (real_time/zero_allocation \
                  module routed to Go; see warnings above)"
-                    .into(),
-            );
+                        .into(),
+                );
+            }
         }
-    }
 
-    let root = std::path::Path::new(out_dir);
-    project
-        .write(root)
-        .map_err(|e| format!("cannot write project to {out_dir}: {e}"))?;
-    if project.has_go {
-        canonicalize_go(&root.join("go"));
-    }
+        let root = std::path::Path::new(out_dir);
+        project
+            .write(root)
+            .map_err(|e| format!("cannot write project to {out_dir}: {e}"))?;
+        if project.has_go {
+            canonicalize_go(&root.join("go"));
+        }
 
-    // Write proof manifest.
-    let manifest = proof::generate_manifest(&src_bytes, &outcomes);
-    let proof_json = proof::to_json(&manifest);
-    fs::write(root.join("telos-proof.json"), &proof_json)
-        .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
+        // Write proof manifest.
+        let manifest = proof::generate_manifest(&src_bytes, &outcomes);
+        let proof_json = proof::to_json(&manifest);
+        fs::write(root.join("telos-proof.json"), &proof_json)
+            .map_err(|e| format!("cannot write telos-proof.json: {e}"))?;
 
-    if json {
+        if json {
+            let mut ok = all_verified;
+
+            if check {
+                if project.has_rust {
+                    let status = std::process::Command::new("cargo")
+                        .arg("build")
+                        .arg("--manifest-path")
+                        .arg(root.join("rust/Cargo.toml"))
+                        .status();
+                    if let Ok(s) = status {
+                        if !s.success() {
+                            ok = false;
+                        }
+                    } else {
+                        ok = false;
+                    }
+                }
+                if project.has_go {
+                    let status = std::process::Command::new("go")
+                        .arg("build")
+                        .arg("./...")
+                        .current_dir(root.join("go"))
+                        .status();
+                    if let Ok(s) = status {
+                        if !s.success() {
+                            ok = false;
+                        }
+                    } else {
+                        ok = false;
+                    }
+                }
+            }
+
+            let problems = tpt_telos_ir::extract(&modules)?;
+            let (functions, _) = collect_verify_output(&problems);
+            let output = JsonProjectOutput {
+                file: file.to_string(),
+                passed: ok,
+                out_dir: out_dir.to_string(),
+                functions,
+                proof_hash: Some(manifest.manifest_hash.clone()),
+                has_rust: project.has_rust,
+                has_go: project.has_go,
+                has_python: project.has_python,
+                has_ffi: project.has_ffi,
+            };
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            return Ok(ok);
+        }
+
+        println!("\nProject written to {out_dir}/");
+        for f in &project.files {
+            println!("  {}", f.path);
+        }
+        println!("  telos-proof.json");
+        println!(
+            "\nBackends: rust={} go={} python={} ffi_bridge={}",
+            project.has_rust, project.has_go, project.has_python, project.has_ffi
+        );
+        println!("Proof manifest written → {out_dir}/telos-proof.json");
+        if !all_verified {
+            println!("WARNING: some functions were not mathematically verified.");
+        }
+
+        if !check {
+            return Ok(all_verified);
+        }
+
         let mut ok = all_verified;
 
-        if check {
-            if project.has_rust {
-                let status = std::process::Command::new("cargo")
-                    .arg("build")
-                    .arg("--manifest-path")
-                    .arg(root.join("rust/Cargo.toml"))
-                    .status();
-                if let Ok(s) = status {
-                    if !s.success() {
-                        ok = false;
-                    }
-                } else {
-                    ok = false;
-                }
-            }
-            if project.has_go {
-                let status = std::process::Command::new("go")
-                    .arg("build")
-                    .arg("./...")
-                    .current_dir(root.join("go"))
-                    .status();
-                if let Ok(s) = status {
-                    if !s.success() {
-                        ok = false;
-                    }
-                } else {
-                    ok = false;
-                }
-            }
-        }
-
-        let problems = tpt_telos_ir::extract(&modules)?;
-        let (functions, _) = collect_verify_output(&problems);
-        let output = JsonProjectOutput {
-            file: file.to_string(),
-            passed: ok,
-            out_dir: out_dir.to_string(),
-            functions,
-            proof_hash: Some(manifest.manifest_hash.clone()),
-            has_rust: project.has_rust,
-            has_go: project.has_go,
-            has_python: project.has_python,
-            has_ffi: project.has_ffi,
-        };
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
-        return Ok(ok);
-    }
-
-    println!("\nProject written to {out_dir}/");
-    for f in &project.files {
-        println!("  {}", f.path);
-    }
-    println!("  telos-proof.json");
-    println!(
-        "\nBackends: rust={} go={} python={} ffi_bridge={}",
-        project.has_rust, project.has_go, project.has_python, project.has_ffi
-    );
-    println!("Proof manifest written → {out_dir}/telos-proof.json");
-    if !all_verified {
-        println!("WARNING: some functions were not mathematically verified.");
-    }
-
-    if !check {
-        return Ok(all_verified);
-    }
-
-    let mut ok = all_verified;
-
-    // Compile the Rust crate.
-    if project.has_rust {
-        println!("\nCompiling Rust backend with cargo...");
-        let status = std::process::Command::new("cargo")
-            .arg("build")
-            .arg("--manifest-path")
-            .arg(root.join("rust/Cargo.toml"))
-            .status()
-            .map_err(|e| format!("could not invoke cargo: {e}"))?;
-        if status.success() {
-            println!("  Rust backend compiles.");
-        } else {
-            eprintln!("  Rust backend failed to compile ({status}).");
-            ok = false;
-        }
-    }
-
-    // Vet the Go package.
-    if project.has_go {
-        println!("\nBuilding Go backend with go...");
-        let status = std::process::Command::new("go")
-            .arg("build")
-            .arg("./...")
-            .current_dir(root.join("go"))
-            .status()
-            .map_err(|e| format!("could not invoke go (is it on PATH?): {e}"))?;
-        if status.success() {
-            println!("  Go backend compiles.");
-        } else {
-            eprintln!("  Go backend failed to compile ({status}).");
-            ok = false;
-        }
-
-        let out = std::process::Command::new("gofmt")
-            .arg("-l")
-            .arg(".")
-            .current_dir(root.join("go"))
-            .output();
-        match out {
-            Ok(o) if o.status.success() => {
-                let listed = String::from_utf8_lossy(&o.stdout);
-                if listed.trim().is_empty() {
-                    println!("  Go sources (incl. cgo FFI) are well-formed.");
-                } else {
-                    eprintln!("  Go sources not gofmt-clean:\n{}", listed);
-                    ok = false;
-                }
-            }
-            Ok(o) => {
-                eprintln!(
-                    "  gofmt reported errors: {}",
-                    String::from_utf8_lossy(&o.stderr)
-                );
+        // Compile the Rust crate.
+        if project.has_rust {
+            println!("\nCompiling Rust backend with cargo...");
+            let status = std::process::Command::new("cargo")
+                .arg("build")
+                .arg("--manifest-path")
+                .arg(root.join("rust/Cargo.toml"))
+                .status()
+                .map_err(|e| format!("could not invoke cargo: {e}"))?;
+            if status.success() {
+                println!("  Rust backend compiles.");
+            } else {
+                eprintln!("  Rust backend failed to compile ({status}).");
                 ok = false;
             }
-            Err(e) => {
-                eprintln!("  could not invoke gofmt: {e}");
+        }
+
+        // Vet the Go package.
+        if project.has_go {
+            println!("\nBuilding Go backend with go...");
+            let status = std::process::Command::new("go")
+                .arg("build")
+                .arg("./...")
+                .current_dir(root.join("go"))
+                .status()
+                .map_err(|e| format!("could not invoke go (is it on PATH?): {e}"))?;
+            if status.success() {
+                println!("  Go backend compiles.");
+            } else {
+                eprintln!("  Go backend failed to compile ({status}).");
+                ok = false;
+            }
+
+            let out = std::process::Command::new("gofmt")
+                .arg("-l")
+                .arg(".")
+                .current_dir(root.join("go"))
+                .output();
+            match out {
+                Ok(o) if o.status.success() => {
+                    let listed = String::from_utf8_lossy(&o.stdout);
+                    if listed.trim().is_empty() {
+                        println!("  Go sources (incl. cgo FFI) are well-formed.");
+                    } else {
+                        eprintln!("  Go sources not gofmt-clean:\n{}", listed);
+                        ok = false;
+                    }
+                }
+                Ok(o) => {
+                    eprintln!(
+                        "  gofmt reported errors: {}",
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                    ok = false;
+                }
+                Err(e) => {
+                    eprintln!("  could not invoke gofmt: {e}");
+                }
             }
         }
-    }
 
-    if ok {
-        println!("\nPROJECT: dual-backend microservice builds successfully.");
+        if ok {
+            println!("\nPROJECT: dual-backend microservice builds successfully.");
+        } else {
+            println!("\nPROJECT: one or more backends failed.");
+        }
+        Ok(ok)
+    };
+    if !watch {
+        run_once()
     } else {
-        println!("\nPROJECT: one or more backends failed.");
+        watch_loop(file, run_once)
     }
-    Ok(ok)
 }
 
 fn run_verify_manifest(manifest_path: &str, source_path: &str) -> Result<(), String> {

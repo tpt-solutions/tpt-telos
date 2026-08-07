@@ -55,7 +55,7 @@ with an enforced 75% line-coverage floor.
 
 ## Workspace layout
 
-Eight crates under `crates/`, each with a focused responsibility in the pipeline:
+Nine crates under `crates/`, each with a focused responsibility in the pipeline:
 
 - **tpt-telos-parser** — hand-written lexer/parser/AST for `.telos` source. Grammar is the source of truth
   at `crates/tpt-telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
@@ -103,6 +103,11 @@ Eight crates under `crates/`, each with a focused responsibility in the pipeline
 - **tpt-telos** — the `telos` binary (clap). Thin orchestration layer over the crates above; also
   contains the AST pretty-printer used by `telos parse` and the `init` scaffold / `verify-manifest`
   drift-check commands.
+- **tpt-telos-sdk** — programmatic orchestration API for integration harnesses (e.g. `tpt-nexus`).
+  Wraps the six crates above into one-call pipeline entry points (`compile`/`compile_static`),
+  a counterexample -> hint formatter (`format_hint`/`format_outcome_hints`), and a build step
+  (`compile_project`/`compile_project_tempdir`) that reads back compiled artifact bytes. See
+  `crates/tpt-telos-sdk/README.md`.
 
 ### Pipeline data flow
 

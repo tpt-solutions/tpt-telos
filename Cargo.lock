@@ -1178,6 +1178,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpt-telos-sdk"
+version = "0.1.1"
+dependencies = [
+ "tpt-telos-agent",
+ "tpt-telos-codegen",
+ "tpt-telos-ir",
+ "tpt-telos-parser",
+ "tpt-telos-router",
+ "tpt-telos-verifier",
+]
+
+[[package]]
 name = "tpt-telos-verifier"
 version = "0.1.1"
 dependencies = [

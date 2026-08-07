@@ -89,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           for crate in tpt-telos-parser tpt-telos-ir tpt-telos-router tpt-telos-verifier \
-                       tpt-telos-agent tpt-telos-codegen tpt-telos-lsp tpt-telos; do
+                        tpt-telos-agent tpt-telos-codegen tpt-telos-sdk tpt-telos-lsp tpt-telos; do
             echo "::group::Publishing $crate"
             cargo publish -p "$crate"
             echo "::endgroup::"

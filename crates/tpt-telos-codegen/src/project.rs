@@ -28,6 +28,12 @@ use crate::{collect_bodies, ffi, go, python, render_rust};
 /// Go package name used for the generated service and its FFI shims.
 pub const GO_PACKAGE: &str = "gosvc";
 
+/// Crate name used for the generated Rust backend library and its compiled
+/// artifacts (`lib<RUST_CRATE_NAME>.rlib` / `lib<RUST_CRATE_NAME>.a`). Promoted
+/// to a `pub const` so consumers (e.g. `tpt-telos-sdk`) can locate the artifact
+/// bytes without hardcoding the string.
+pub const RUST_CRATE_NAME: &str = "generated_rust";
+
 /// A single generated file, addressed by a path relative to the project root.
 ///
 /// # Examples
@@ -261,7 +267,8 @@ fn rust_cargo_toml(dual: bool) -> String {
         ""
     };
     format!(
-        "[package]\nname = \"generated_rust\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{lib}\n[dependencies]\n\n[workspace]\n",
+        "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{lib}\n[dependencies]\n\n[workspace]\n",
+        RUST_CRATE_NAME,
         lib = lib_section
     )
 }

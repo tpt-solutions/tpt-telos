@@ -322,6 +322,7 @@ mod tests {
                 is_approximation: false,
                 counterexample: None,
                 or_group: None,
+                location: None,
             })
             .collect();
         let all_passed = checks_vec.iter().all(|c| c.passed);

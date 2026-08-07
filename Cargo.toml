@@ -10,6 +10,7 @@ members = [
     "crates/tpt-telos-lsp",
     "crates/tpt-telos-cli",
     "crates/out-telos-wasm",
+    "crates/tpt-telos-sdk",
 ]
 
 [workspace.package]

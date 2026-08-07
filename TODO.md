@@ -186,7 +186,7 @@
     enabled, verification uses Z3 instead of Fourier-Motzkin. The `negate`
     function in `solver.rs` was made `pub` to support this dispatch.
 
-## Status: tpt-telos v1.2 — Phase 7 complete.
+## Status: tpt-telos v1.2 — Phases 7–10 complete.
 
 The full pipeline is in place: parser -> IR/constraint extraction -> SMT-style
 verifier -> agentic transpiler (Generate -> Verify -> Counter-example ->
@@ -265,58 +265,59 @@ Phase 7 additions:
 > Findings from a full-platform review (bugs, docs, usability, adoption). Architecture decision:
 > stay with the self-contained FM solver / flat `crates/` workspace rather than expanding toward
 > spec.txt's Z3/CVC5-primary, Kani/Prusti, LangGraph/vLLM, sibling-repo-integrated design — see
-> rationale below. None of the items in this phase are implemented yet.
+> rationale below. All items in this phase are implemented (see checkboxes below); the codebase
+> contains the soundness fixes, router diagnostics, FFI validation, and CLI UX work.
 
 ### Soundness & correctness bugs
-- [ ] **Fix `if`/`else` contract lowering unsoundness** — `to_constraints_dnf` accepts the `else`
+- [x] **Fix `if`/`else` contract lowering unsoundness** — `to_constraints_dnf` accepts the `else`
   branch unconditionally instead of guarding it with `!cond`, so a function that always executes
   `else` can verify even when `cond` was true and `then` should have applied.
   (`crates/tpt-telos-ir/src/extract.rs`, `Expr::If` arm)
-- [ ] **Fix `match` contract lowering unsoundness** — same issue: each arm becomes an independent
+- [x] **Fix `match` contract lowering unsoundness** — same issue: each arm becomes an independent
   DNF branch with no premise tying it to the scrutinee matching that pattern.
   (`crates/tpt-telos-ir/src/extract.rs`, `Expr::Match` arm)
-- [ ] **Fix nonlinear-bounding max-corner bug** — `linearize_bounded` always substitutes the
+- [x] **Fix nonlinear-bounding max-corner bug** — `linearize_bounded` always substitutes the
   single max corner value regardless of whether the surrounding relation needs an upper or lower
   bound, which can prove false facts or reject true ones depending on direction.
   (`crates/tpt-telos-ir/src/extract.rs`, `linearize_bounded`)
-- [ ] **Reject non-integer types at FFI boundaries** — `ffi.rs` hardcodes every scalar/field to
+- [x] **Reject non-integer types at FFI boundaries** — `ffi.rs` hardcodes every scalar/field to
   `int64_t`/`i64`; floats/strings/bools/arrays/nested structs crossing an FFI-routed boundary are
   silently coerced instead of rejected with a clear error. (`crates/tpt-telos-codegen/src/ffi.rs`)
-- [ ] **Diagnose `real_time`/`zero_allocation` routed to Python** — `RoutingDiagnostic` only
+- [x] **Diagnose `real_time`/`zero_allocation` routed to Python** — `RoutingDiagnostic` only
   checks Go-target conflicts; a module tagged `@boundary(real_time, ml_training)` silently routes
   to Python (GC + interpreter) with no warning. (`crates/tpt-telos-router/src/lib.rs`)
-- [ ] **Warn on unrecognized `@state(...)` values** — typos like `@state(persistant)` silently
+- [x] **Warn on unrecognized `@state(...)` values** — typos like `@state(persistant)` silently
   fall back to `Ephemeral` with no diagnostic. (`crates/tpt-telos-router/src/lib.rs`)
-- [ ] **`StaticAgent`: handle inequality-only `ensures`** — currently only `==`, `if`/`match`
+- [x] **`StaticAgent`: handle inequality-only `ensures`** — currently only `==`, `if`/`match`
   splits, and direct calls synthesize a body; a pure inequality postcondition (e.g.
   `ensures balance >= 0`) silently produces an empty body instead of a reasonable first attempt.
   (`crates/tpt-telos-agent/src/static_agent.rs`)
-- [ ] **`eject --func <name>`: error on unmatched function name** — if the requested name doesn't
+- [x] **`eject --func <name>`: error on unmatched function name** — if the requested name doesn't
   exist but a different function has `@eject`, that other function is silently ejected instead of
   reporting "function not found." (`crates/tpt-telos-cli/src/main.rs`)
 
 ### Documentation integrity
-- [ ] Fix Phase 8's intro line (says most items are "proposed follow-ups, not yet implemented"
+- [x] Fix Phase 8's intro line (says most items are "proposed follow-ups, not yet implemented"
   while every item below is checked `[x]`) — resolve the inconsistency one way or the other.
 - [ ] Remove stray duplicate `TODO 126071x.md`-style files at repo root if confirmed to be
   accidental artifacts.
-- [ ] Add `examples/README.md` indexing all 12 `.telos` fixtures (one line each: what it
-  demonstrates), since several fixture comments (`float.telos`, `array_test.telos`) qualify
-  claims made in Phase 6 that aren't visible from TODO.md alone.
-- [ ] Cross-link root README to the 8 crate-level READMEs; add a troubleshooting section
-  covering missing `gofmt`/`go`/Z3 on PATH (currently only documented in CLAUDE.md).
-- [ ] Add a short note to the root README on how the implemented architecture diverges from
+- [x] Add `examples/README.md` indexing all 12 `.telos` fixtures (one line each: what it
+   demonstrates), since several fixture comments (`float.telos`, `array_test.telos`) qualify
+   claims made in Phase 6 that aren't visible from TODO.md alone.
+- [x] Cross-link root README to the 8 crate-level READMEs; add a troubleshooting section
+   covering missing `gofmt`/`go`/Z3 on PATH (currently only documented in CLAUDE.md).
+- [x] Add a short note to the root README on how the implemented architecture diverges from
   spec.txt's aspirational layout/tech stack, and why (see Phase 9 rationale above).
 
 ### CLI & automation UX
-- [ ] Make `--json` available on `telos eject`/`parse` (currently only on `verify`/`build`/`project`).
-- [ ] Add colorized/rustc-style diagnostic output (caret/underline source spans) to CLI errors.
-- [ ] Extend `--watch` beyond `verify` (currently naive single-file mtime poll, no debounce) to
+- [x] Make `--json` available on `telos eject`/`parse` (currently only on `verify`/`build`/`project`).
+- [x] Add colorized/rustc-style diagnostic output (caret/underline source spans) to CLI errors.
+- [x] Extend `--watch` beyond `verify` (currently naive single-file mtime poll, no debounce) to
   `build`/`project`, and add debouncing + directory-wide watching.
-- [ ] Add shell-completion generation (`clap_complete`) via a `telos completions` subcommand.
-- [ ] Add `telos init --template <name>` with 2-3 starter templates (simple invariant, dual-backend
+- [x] Add shell-completion generation (`clap_complete`) via a `telos completions` subcommand.
+- [x] Add `telos init --template <name>` with 2-3 starter templates (simple invariant, dual-backend
   FFI, eject) instead of one hardcoded Counter module.
-- [ ] Surface the FM solver's documented integer-incompleteness in `verify` failure output, hinting
+- [x] Surface the FM solver's documented integer-incompleteness in `verify` failure output, hinting
   that some failures may be solver limitations rather than genuine spec violations.
 
 ### Editor integration (highest-leverage adoption gap)
@@ -339,3 +340,53 @@ Phase 7 additions:
 - [x] Prototype a WASM build of `telos-parser` + `telos-verifier` (both dependency-light; default
   solver path needs no external Z3) for a browser-based playground — zero-install trial for new users.
   (`crates/out-telos-wasm/`)
+
+## Phase 10: `tpt-telos-sdk` — Programmatic Orchestration API
+
+> Motivation: a sibling integration-harness repo (`tpt-nexus`) needs a single library API over the
+> parse -> agentic-transpile -> codegen -> attest pipeline instead of depending on 6 crates directly
+> and hand-rolling its own orchestrator. Investigation showed most of what such an orchestrator needs
+> (retry-loop observability via `FuncOutcome.iterations`, the manifest/attestation step) already
+> exists in `tpt-telos-agent`/`tpt-telos-codegen` — it just isn't exposed as a public library today
+> (it's wired together only inside `tpt-telos-cli`'s private `main.rs`). Scoped to close exactly the
+> gaps that are real (a one-call pipeline entry point, a counterexample -> hint formatter, a build
+> step that reads back compiled artifact bytes) — not `spec2.txt`'s full original vision (no PyO3
+> bindings, no gRPC/HTTP daemon mode; zero current demand for either).
+
+- [x] **New crate `tpt-telos-sdk`** — add to workspace `members`; `Cargo.toml` with path deps on
+  `tpt-telos-parser`/`-ir`/`-verifier`/`-router`/`-agent`/`-codegen`, `llm`/`z3` passthrough features.
+  (`crates/tpt-telos-sdk/Cargo.toml`, root `Cargo.toml`)
+- [x] **`RUST_CRATE_NAME` const** — promote the hardcoded `"generated_rust"` literal in
+  `rust_cargo_toml()` to a `pub const`, mirroring the existing `pub const GO_PACKAGE`.
+  (`crates/tpt-telos-codegen/src/project.rs`)
+- [x] **One-call pipeline (`compile`/`compile_static`)** — wraps
+  parse -> `transpile_module` per module -> `generate_project` -> `generate_manifest` into a single
+  `VerifiedArtifact { source, modules, outcomes, project, manifest, all_verified }`; `Err` only for
+  "pipeline couldn't run" (parse/agent/codegen errors), not verification failure.
+  (`crates/tpt-telos-sdk/src/lib.rs`)
+- [x] **`SdkError`** — `Parse`/`Transpile`/`Codegen`/`Io`/`ToolNotFound` variants with `Display`/`Error`.
+  (`crates/tpt-telos-sdk/src/error.rs`)
+- [x] **Counterexample hint formatter (`format_hint`/`format_outcome_hints`)** — the "agent_hint"
+  concept `tpt-nexus`'s TODO flags as missing from tpt-telos: renders a `CheckResult`'s clause kind,
+  disjunction/approximation caveats, and sorted `Model` counterexample bindings (post-state keys as
+  `<base>.<field> (post-state)`) into human/LLM-readable text.
+  (`crates/tpt-telos-sdk/src/hint.rs`)
+- [x] **Build/compile-to-artifact-bytes (`compile_project`/`compile_project_tempdir`)** — writes a
+  `Project` to disk, shells `cargo build`/`go build` per backend, reads back the Rust
+  rlib/staticlib bytes (Go yields no byte artifact — no `package main` exists to build a discoverable
+  output from). Missing `cargo`/`go` on PATH -> `Err(ToolNotFound)`; a build that runs but fails ->
+  `Ok(BuildOutput { success: false, .. })`. (`crates/tpt-telos-sdk/src/build.rs`)
+- [x] **Flat re-exports** — `tpt_telos_sdk::*` covers `FuncOutcome`, `CodeAgent`, `Model`, `Target`,
+  `ProofManifest`, `StaticAgent`, `#[cfg(feature="llm")] LlmAgent`, etc. so consumers don't need all 6
+  wrapped crates as direct deps for type names. (`crates/tpt-telos-sdk/src/lib.rs`)
+- [x] **New fixture `examples/unsatisfiable.telos`** — two `ensures` clauses on the same field that
+  can't both hold, to deterministically exercise the "verification permanently fails" path (unlike
+  `broken.telos`, whose buggy body the agentic loop actually repairs).
+- [x] **Test suite** — unit tests per module (`hint.rs`/`build.rs`/`lib.rs`) plus `tests/sdk.rs`
+  integration tests: `wallet.telos` verifies end-to-end, `unsatisfiable.telos` fails with a hint
+  reporting the contradiction, `broken.telos` gets silently repaired (locks in that non-obvious
+  behavior so it can't regress unnoticed). (`crates/tpt-telos-sdk/tests/sdk.rs`)
+- [x] **Release/publish wiring** — add `tpt-telos-sdk` to the `cargo publish` loop.
+  (`.github/workflows/release.yml`)
+- [x] **Docs** — `crates/tpt-telos-sdk/README.md` (matching sibling crate READMEs);
+  `CLAUDE.md`'s "Workspace layout" updated from eight to nine crates.

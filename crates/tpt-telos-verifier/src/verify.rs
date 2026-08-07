@@ -25,6 +25,10 @@ pub struct CheckResult {
     /// group `n` (at least one check in the group must pass). `None` for
     /// independent checks that must each pass individually.
     pub or_group: Option<usize>,
+    /// Source location `(line, column)` of the conclusion (an `ensures` clause
+    /// or invariant), used by the CLI to render rustc-style caret/underline
+    /// diagnostics. `None` for synthetic checks not tied to a source span.
+    pub location: Option<(usize, usize)>,
 }
 
 /// The aggregate verification result for a single function.
@@ -120,6 +124,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
             is_approximation: concl.is_approximation,
             counterexample: ce,
             or_group: concl.or_group,
+            location: Some((concl.location.line, concl.location.col)),
         });
     }
 
@@ -151,6 +156,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
                 is_approximation: concl.is_approximation,
                 counterexample: ce,
                 or_group: concl.or_group,
+                location: Some((concl.location.line, concl.location.col)),
             });
         }
         if !any_passed {
