@@ -16,7 +16,9 @@ pub mod verify;
 #[cfg(feature = "z3")]
 pub mod z3_solver;
 
-pub use solver::{counterexample, entails, model, negate, satisfies_model, unsat, Model};
+pub use solver::{
+    counterexample, entails, model, negate, satisfies_model, unsat, unsat_checked, Model,
+};
 pub use verify::{is_unsat, verify, CheckResult, VerificationResult};
 
 /// The solver backend to use for verification.

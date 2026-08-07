@@ -127,7 +127,12 @@ optional `cargo build` / `go build` / `gofmt` invocation by the CLI.
 - No implicit type coercion, no hidden allocation — every operation is explicitly named (by design,
   to keep the language easy for both humans and the LLM agent to reason about).
 
-### Known gaps (do not assume these work without checking; Phase 7 and 8 are both complete per `TODO.md`)
+### Historical archives (do not clean up)
+
+The `history/TODO 1260723.md` and `history/TODO 1260713.md` files are **intentional
+historical snapshots** of an older TODO (they reference pre-rename crate paths like
+`crates/telos-parser`). They are NOT the source of truth — `TODO.md` at the repo root is.
+Do not delete, move, or "tidy" these files; leave them in place.
 
 - The LSP's `textDocument/codeAction` quick-fix only ever suggests excluding the exact counterexample
   witness (`requires !(v1 == a && v2 == b && ...)`) — it's a starting point for the developer to

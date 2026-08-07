@@ -27,7 +27,7 @@ Or use the pre-built binary from the project releases.
 ### From a VSIX package
 
 ```sh
-vsce package          # builds telos-0.1.0.vsix
+vsce package          # builds telos-0.1.1.vsix
 code --install-extension telos-0.1.0.vsix
 ```
 

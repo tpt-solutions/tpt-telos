@@ -2,6 +2,11 @@
 
 Rust Cargo workspace. The `telos` binary (crate `tpt-telos`) is the compiler frontend. The full pipeline narrative lives in `TODO.md`.
 
+> **Historical archives:** `history/TODO 1260723.md` and `history/TODO 1260713.md` are
+> intentional historical snapshots (they reference pre-rename crate paths like
+> `crates/telos-parser`). They are NOT the source of truth and must not be deleted or
+> cleaned up. `TODO.md` at the repo root is authoritative.
+
 ## Build & verify (these are the CI gates)
 - `cargo fmt --all -- --check` — format gate.
 - `cargo clippy --workspace --all-targets -- -D warnings` — warnings denied.

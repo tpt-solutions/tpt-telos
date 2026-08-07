@@ -2,7 +2,7 @@
   "name": "telos",
   "displayName": "telos",
   "description": "Language support for .telos files",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "tpt-solutions",
   "engines": {
     "vscode": "^1.75.0"

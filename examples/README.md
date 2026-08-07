@@ -4,6 +4,7 @@ Fixture `.telos` files used by integration tests and to demonstrate language fea
 
 | File | Demonstrates |
 |------|--------------|
+| `START-HERE.telos` | **Start here.** An annotated, fully-commented single-module walkthrough of every core construct (module, `@boundary`, invariant, `requires`/`ensures`/`old`, `mutate state`); verifies and is referenced from the README. |
 | `wallet.telos` | Core pass case: `@boundary(cpu_bound)` module with a non-negative balance invariant, `transfer` with `requires`/`ensures` and `old(...)`. |
 | `broken.telos` | Core fail case: intentionally wrong mutation body (adds instead of subtracts) so `telos verify` exits non-zero with a counterexample. |
 | `nested.telos` | Nested arithmetic in `ensures` (`old(c.value) * 2 + a + b`), `&&`-flattened `requires`, and scalar equality post-conditions. |
@@ -16,3 +17,4 @@ Fixture `.telos` files used by integration tests and to demonstrate language fea
 | `interval.telos` | Nonlinear interval bounding: `ensures x * y <= 50` over-approximated via interval arithmetic when both variables have bounded `requires`; result tagged `[interval-bounded]`. |
 | `cross_module.telos` | Cross-module invariant references: `Operations` uses `Counter` declared in `Core`; demonstrates the global type-resolution pass in `tpt-telos-ir`. |
 | `physics.telos` | `@boundary(ml_training)` routed to the Python/JAX backend; demonstrates the Python codegen target with `@dataclass` structs and runtime `assert` guards. |
+| `overflow.telos` | Integer bounds at the `i64` extremes; exercises the solver's checked-`i128` arithmetic so large magnitudes degrade conservatively (no panic, no spurious contradiction) instead of overflowing. |

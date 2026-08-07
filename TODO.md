@@ -390,3 +390,78 @@ Phase 7 additions:
   (`.github/workflows/release.yml`)
 - [x] **Docs** — `crates/tpt-telos-sdk/README.md` (matching sibling crate READMEs);
   `CLAUDE.md`'s "Workspace layout" updated from eight to nine crates.
+
+## Phase 11: Platform Review — Bugs, Gaps, Adoption & Automation (2026-08-08)
+
+> Findings from a full platform review (documentation integrity, soundness, adoption,
+> automation). The review plan is tracked in `.kilo/plans/1786107629137-platform-review-plan.md`.
+> Note: per instruction, the `history/TODO 1260723.md` / `history/TODO 1260713.md` snapshot
+> files are intentional archives and must NOT be deleted or cleaned up.
+
+### Documentation integrity
+- [x] **Fix crate-count inconsistency** — README/ARCHITECTURE/CONTRIBUTING said "eight crates"
+  while the workspace has ten members (`out-telos-wasm`, `tpt-telos-sdk` omitted); aligned all
+  three docs + README crate table. (`README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`)
+- [x] **Fix version drift** — `Cargo.toml` is `0.1.1`, `grammar.ebnf` said "v0.2.0", CHANGELOG
+  only had `0.1.0`, vscode README/package.json said `0.1.0`; synced grammar to `0.1.1`, added a
+  `0.1.1` CHANGELOG entry, and bumped the vscode `0.1.1.vsix` / `package.json` version.
+  (`crates/tpt-telos-parser/src/grammar.ebnf`, `CHANGELOG.md`, `vscode-telos/*`, `Cargo.toml`)
+- [x] **Fix grammar.ebnf `@state` claim** — comment said "(storage class, parsed only)" but
+  `@state(persistent|ephemeral)` is implemented (storage class in router/codegen); corrected.
+  (`crates/tpt-telos-parser/src/grammar.ebnf`)
+- [x] **README usage omissions** — added `telos completions`, `telos transpile`, and
+  `telos init --template` snippets (including the new templates). (`README.md`)
+- [x] **Note on history TODO files** — documented in `AGENTS.md`/`CLAUDE.md` that
+  `history/TODO 1260723.md` / `history/TODO 1260713.md` are intentional archives not to be
+  deleted. (`AGENTS.md`, `CLAUDE.md`)
+
+### Soundness & correctness hardening
+- [x] **Harden FM solver against `i128` overflow** — `solver.rs` now uses checked `i128`
+  arithmetic; on overflow `unsat_checked` returns `None` ("bounds too large to decide") and
+  `unsat` conservatively returns `false` (never a spurious contradiction), preserving the
+  advertised integer-soundness. (`crates/tpt-telos-verifier/src/solver.rs`)
+- [x] **Add `examples/overflow.telos` fixture + verifier test** — `unsat_checked_overflow_is_conservative`
+  (unit) and `overflow_example_does_not_panic` (integration) lock in the overflow behavior.
+  (`examples/overflow.telos`, `crates/tpt-telos-verifier/tests/nested.rs`, `solver.rs`)
+- [x] **Warn on unknown `@boundary(...)` flags** — typos like `@boundary(cp_bound)` now emit an
+  `UnrecognizedBoundaryFlag` diagnostic in `route_checked`. (`crates/tpt-telos-router/src/lib.rs`)
+- [x] **`collect_verify_output` JSON group-awareness — verified correct** — audited: `verify()`
+  computes `all_passed` via `any_passed` per disjunction group, and `collect_verify_output` reads
+  that field (not per-check `passed`), so JSON `overall` already honors disjunction groups. No change.
+- [ ] **`assign_constraint` rejects bare local-variable assignment targets** — only `Expr::Field`
+  targets are accepted; `Stmt::Assign` to a bare `Expr::Var` (e.g. a scalar `ensures out == a + b`
+  output bound by `out = a + b;`) returns `Err`. Reachable from the default offline `StaticAgent`:
+  `synthesize_from_ensures` deliberately emits exactly this shape for scalar (non-field) `ensures`
+  clauses. (`crates/tpt-telos-ir/src/extract.rs`, `assign_constraint`)
+- [ ] **`problem_for` panics instead of returning `Result`** — `tpt-telos-agent`'s re-extraction
+  step (`.expect("re-extraction of a well-formed spec must succeed")`) turns the `assign_constraint`
+  gap above into a hard process panic on the *first* verify attempt for any elided-body function
+  with a scalar `ensures` clause, instead of a normal pipeline error; no `--features llm` needed to
+  hit it. (`crates/tpt-telos-agent/src/lib.rs`, `problem_for`)
+
+### Adoption: templates, examples, SDK docs
+- [x] **New `init --template` options** — added `real-time`, `python-ml`, `cross-module`
+  (and fixed pre-existing `: Int` return-type and `return`-in-`mutate state` bugs in the
+  `simple`/`dual-backend`/`eject` templates so every template verifies).
+  (`crates/tpt-telos-cli/src/main.rs`, `tests/cli.rs`)
+- [x] **`examples/START-HERE.telos`** — annotated walkthrough referenced from README.
+  (`examples/START-HERE.telos`, `examples/README.md`)
+- [x] **`telos new <name>` project scaffold** — emits a `<name>.telos` + README so a beginner
+  reaches `telos project --check` in one command. (`crates/tpt-telos-cli/src/main.rs`, `tests/cli.rs`)
+- [x] **Document the SDK in the root README** — added a "Using the SDK" section +
+  `crates/tpt-telos-sdk/examples/sdk_usage.rs` (runnable example). (`README.md`, `crates/tpt-telos-sdk/examples/sdk_usage.rs`)
+
+### Automation & CI
+- [x] **CI doc-consistency check** — `.github/workflows/ci.yml` now asserts crate count +
+  version labels in README/ARCHITECTURE/CONTRIBUTING/grammar.ebnf match `Cargo.toml`.
+- [x] **MSRV job** — `.github/workflows/ci.yml` enforces `rust-version = 1.74` (dtolnay/rust-toolchain@1.74.0).
+- [ ] **Playground deploy job** — build `out-telos-wasm` and publish a static `playground/`
+  site to GitHub Pages. (`playground/`, `.github/workflows/`)
+
+### Innovation (open)
+- [ ] **LSP symbol index** — wire `textDocument/definition` / `references` / `completion` from a
+  workspace-wide symbol table; add inlay hints for `old(...)` values and routing target.
+  (`crates/tpt-telos-lsp/`)
+- [ ] **Hosted browser playground** — minimal `playground/` static site (textarea + live
+  `verify` output + counterexample display) over `out-telos-wasm`. (`playground/`)
+

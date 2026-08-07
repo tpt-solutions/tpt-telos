@@ -30,6 +30,23 @@ fn nested_example_passes() {
 }
 
 #[test]
+fn overflow_example_does_not_panic() {
+    // examples/overflow.telos uses integer bounds at the i64 extremes. The
+    // verifier must handle them with checked arithmetic (no panic, no spurious
+    // contradiction) rather than overflowing fixed-width integers.
+    let src = std::fs::read_to_string("../../examples/overflow.telos").unwrap();
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let r = verify(&problems[0]);
+    assert!(
+        r.all_passed,
+        "overflow.telos (a tautology) should verify, got {:?}",
+        r
+    );
+}
+
+#[test]
 fn compound_has_expected_problem_shape() {
     let src = std::fs::read_to_string("../../examples/nested.telos").unwrap();
     let modules = parse(&src).unwrap();

@@ -47,7 +47,22 @@ enum Command {
         /// Output file path (default: <module>.telos).
         #[arg(long)]
         out: Option<String>,
-        /// Starter template to scaffold. Options: simple (default), dual-backend, eject.
+        /// Starter template to scaffold. Options: simple (default), dual-backend,
+        /// eject, real-time, python-ml, cross-module.
+        #[arg(long, default_value = "simple")]
+        template: String,
+    },
+    /// Scaffold a project directory (a .telos module plus a README) that can be
+    /// passed straight to `telos project --check`.
+    New {
+        /// Name of the project (and module) to generate (default: "MyProject").
+        #[arg(long, default_value = "MyProject")]
+        name: String,
+        /// Output directory for the project (default: `<name>`).
+        #[arg(long)]
+        out_dir: Option<String>,
+        /// Starter template to scaffold. Options: simple (default), dual-backend,
+        /// eject, real-time, python-ml, cross-module.
         #[arg(long, default_value = "simple")]
         template: String,
     },
@@ -180,6 +195,17 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("init error: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::New {
+            name,
+            out_dir,
+            template,
+        } => match run_new(&name, out_dir.as_deref(), &template) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("new error: {e}");
                 ExitCode::FAILURE
             }
         },
@@ -426,6 +452,46 @@ fn canonicalize_go(go_dir: &std::path::Path) {
 fn run_init(module_name: &str, out: Option<&str>, template: &str) -> Result<(), String> {
     let default_path = format!("{}.telos", module_name);
     let path = out.unwrap_or(&default_path);
+    let content = render_init_template(module_name, template)?;
+    fs::write(path, &content).map_err(|e| format!("cannot write `{path}`: {e}"))?;
+    println!("Scaffolded {path} with module `{module_name}` (template: {template}).");
+    println!("Run `telos verify {path}` to verify the contracts.");
+    Ok(())
+}
+
+/// Scaffold a project directory: a `<name>.telos` module (from `template`)
+/// plus a `README.md` with the next steps, so a beginner can go from zero to
+/// `telos project --check` in one command.
+fn run_new(name: &str, out_dir: Option<&str>, template: &str) -> Result<(), String> {
+    let root = std::path::Path::new(out_dir.unwrap_or(name));
+    let telos_path = root.join(format!("{name}.telos"));
+    let readme_path = root.join("README.md");
+
+    fs::create_dir_all(root).map_err(|e| format!("cannot create `{root:?}`: {e}"))?;
+
+    let content = render_init_template(name, template)?;
+    fs::write(&telos_path, &content).map_err(|e| format!("cannot write `{telos_path:?}`: {e}"))?;
+
+    let readme = format!(
+        "# {name}\n\n\
+         A tpt-telos project scaffolded with `telos new` (template: {template}).\n\n\
+         ## Next steps\n\n\
+         - Verify the contracts: `telos verify {name}.telos`\n\
+         - Build a verified Rust crate: `telos build {name}.telos --out-dir gen`\n\
+         - Generate a dual Rust+Go project: `telos project {name}.telos --out-dir gen-project --check`\n\
+         - Emit machine-readable output for CI: `telos verify {name}.telos --json`\n"
+    );
+    fs::write(&readme_path, &readme).map_err(|e| format!("cannot write `{readme_path:?}`: {e}"))?;
+
+    println!("Scaffolded project in `{root:?}` (template: {template}).");
+    println!("  - {telos_path:?}");
+    println!("  - {readme_path:?}");
+    println!("Run `telos project {telos_path:?} --out-dir gen-project --check` to build it.");
+    Ok(())
+}
+
+/// Render the source of a starter `.telos` module for `telos init` / `telos new`.
+fn render_init_template(module_name: &str, template: &str) -> Result<String, String> {
     let content = match template {
         "simple" | "" => format!(
             "@boundary(cpu_bound)\n\
@@ -444,14 +510,14 @@ fn run_init(module_name: &str, out: Option<&str>, template: &str) -> Result<(), 
                      }}\n\
                  }}\n\
              \n\
-                 func get(c: Counter): Int\n\
-                     requires c.count >= 0\n\
-                     ensures result == c.count\n\
-                 {{\n\
-                     mutate state {{\n\
-                         return c.count\n\
-                     }}\n\
-                 }}\n\
+                func decrement(c: Counter)\n\
+                    requires c.count > 0\n\
+                    ensures c.count == old(c.count) - 1\n\
+                {{\n\
+                    mutate state {{\n\
+                        c.count -= 1\n\
+                    }}\n\
+                }}\n\
              }}\n",
             mod = module_name,
         ),
@@ -478,12 +544,16 @@ fn run_init(module_name: &str, out: Option<&str>, template: &str) -> Result<(), 
              @boundary(network_io)\n\
              module {mod}Go {{\n\
              \n\
-                 func handle(req: Int): Int\n\
+                 invariant Box {{\n\
+                     total >= 0\n\
+                 }}\n\
+             \n\
+                 func handle(b: Box, req: Int)\n\
                      requires req >= 0\n\
-                     ensures result >= 0\n\
+                     ensures b.total == old(b.total) + req\n\
                  {{\n\
                      mutate state {{\n\
-                         return req\n\
+                         b.total += req\n\
                      }}\n\
                  }}\n\
              }}\n",
@@ -493,30 +563,104 @@ fn run_init(module_name: &str, out: Option<&str>, template: &str) -> Result<(), 
             "@boundary(cpu_bound)\n\
              module {mod} {{\n\
              \n\
+                 invariant Counter {{\n\
+                     count >= 0\n\
+                 }}\n\
+             \n\
                  // @eject marks this function as a trusted opaque block.\n\
                  // The compiler generates a guard wrapper that enforces contracts at runtime.\n\
                  @eject\n\
-                 func process(x: Int): Int\n\
-                     requires x >= 0\n\
-                     ensures result >= x\n\
+                 func process(c: Counter, by: Int)\n\
+                     requires c.count >= by\n\
+                     ensures c.count == old(c.count) - by\n\
                  {{\n\
                      mutate state {{\n\
-                         return x\n\
+                         c.count -= by\n\
                      }}\n\
                  }}\n\
              }}\n",
             mod = module_name,
         ),
+        "real-time" => format!(
+            "// Real-time / zero-allocation template: routes to Rust (no GC) and is\n\
+        // rejected by `telos project --check --strict-rt` if accidentally routed to Go.\n\
+        @boundary(real_time, zero_allocation)\n\
+        module {mod} {{\n\
+        \n\
+        invariant Controller {{\n\
+        \n\
+        setpoint >= 0\n\
+        \n\
+        }}\n\
+        \n\
+        func step(c: Controller, dt: Int)\n\
+        requires dt > 0\n\
+        ensures c.setpoint == old(c.setpoint) + dt\n\
+        {{\n\
+        mutate state {{\n\
+        c.setpoint += dt\n\
+        }}\n\
+        }}\n\
+        }}\n",
+            mod = module_name,
+        ),
+        "python-ml" => format!(
+            "// ML / JAX template: routed to the Python backend (@dataclass + runtime asserts).\n\
+        @boundary(ml_training)\n\
+        module {mod} {{\n\
+        \n\
+        invariant Tensor {{\n\
+        \n\
+        dims > 0\n\
+        \n\
+        }}\n\
+        \n\
+        func normalize(t: Tensor, scale: Int)\n\
+        requires scale >= 0\n\
+        ensures t.dims == old(t.dims) + scale\n\
+        {{\n\
+        mutate state {{\n\
+        t.dims = t.dims + scale\n\
+        }}\n\
+        }}\n\
+        }}\n",
+            mod = module_name,
+        ),
+        "cross-module" => format!(
+            "// Cross-module template: one module declares an invariant type, another\n\
+        // references it (exercises the global type-resolution pass in tpt-telos-ir).\n\
+        @boundary(cpu_bound)\n\
+        module {mod}Core {{\n\
+        \n\
+        invariant Counter {{\n\
+        \n\
+        count >= 0\n\
+        \n\
+        }}\n\
+        }}\n\
+        \n\
+        @boundary(cpu_bound)\n\
+        module {mod}Ops {{\n\
+        \n\
+        func bump(c: Counter)\n\
+        requires c.count >= 0\n\
+        ensures c.count == old(c.count) + 1\n\
+        {{\n\
+        mutate state {{\n\
+        c.count += 1\n\
+        }}\n\
+        }}\n\
+        }}\n",
+            mod = module_name,
+        ),
         other => {
             return Err(format!(
-                "unknown template `{other}`; valid options: simple, dual-backend, eject"
+                "unknown template `{other}`; valid options: simple, dual-backend, eject, \
+                 real-time, python-ml, cross-module"
             ))
         }
     };
-    fs::write(path, &content).map_err(|e| format!("cannot write `{path}`: {e}"))?;
-    println!("Scaffolded {path} with module `{module_name}` (template: {template}).");
-    println!("Run `telos verify {path}` to verify the contracts.");
-    Ok(())
+    Ok(content)
 }
 
 fn run_parse(file: &str, json: bool) -> Result<(), String> {

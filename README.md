@@ -36,8 +36,13 @@ cargo build --release -p tpt-telos
 ## Usage
 
 ```sh
-# Scaffold a starter module
+# Scaffold a starter module (templates: simple [default], dual-backend, eject,
+# real-time, python-ml, cross-module)
 telos init --module MyModule --out my_module.telos
+telos init --module Svc --template dual-backend --out svc.telos
+
+# Scaffold a whole project directory (module + README) ready for `telos project`
+telos new --name MyProject --template cross-module
 
 # Parse and type/contract-check a .telos file
 telos parse  examples/wallet.telos
@@ -70,6 +75,9 @@ telos eject examples/microservice.telos --func withdraw
 # Re-hash source against a previously generated telos-proof.json to detect drift
 telos verify-manifest gen/telos-proof.json examples/wallet.telos
 
+# Generate shell completions (bash, zsh, fish, powershell, elvish)
+telos completions bash > /etc/bash_completion.d/telos
+
 # Run the language server (JSON-RPC 2.0 over stdio)
 telos lsp
 ```
@@ -99,6 +107,8 @@ At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
 | `tpt-telos-agent`   | `CodeAgent` trait: `StaticAgent` + `LlmAgent` (behind `llm`). |
 | `tpt-telos-codegen` | Rust/Go/Python backends, FFI bridge, eject, project assembly, cryptographic proof manifest. |
 | `tpt-telos-lsp`     | JSON-RPC 2.0 language server over stdio (diagnostics, hover, quick-fix code actions, `telos/verify`, `telos/eject`). |
+| `tpt-telos-sdk`   | Programmatic orchestration API: one-call `compile`/`compile_static` pipeline, counterexample → hint formatter, and `compile_project` build step for integrators. |
+| `out-telos-wasm`   | WASM bindings over `parser` + `verifier` for the zero-install browser playground. |
 
 ## Architecture note: divergence from spec.txt
 
@@ -106,8 +116,10 @@ At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
 `verifier/`, and `ai-orchestrator/` sibling directories, and assumed Z3/CVC5 as the
 primary solver, a LangGraph-style orchestration layer, and vLLM for local inference.
 
-What was built instead is a flat **Cargo workspace** under `crates/` with eight
-focused crates (parser, ir, verifier, router, agent, codegen, lsp, cli). The reasons:
+What was built instead is a flat **Cargo workspace** under `crates/` with ten
+focused members (parser, ir, verifier, router, agent, codegen, lsp, cli, the
+`out-telos-wasm` browser-playground bindings, and the `tpt-telos-sdk` orchestration
+API). The reasons:
 
 - A single workspace makes cross-crate refactoring, CI, and coverage tooling
   straightforward with standard Cargo tooling and no per-directory build wiring.
@@ -167,3 +179,22 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual-licensed as above, without any additional terms or conditions.
+
+## Using the SDK
+
+If you are building an integration (CI gate, orchestration service, sibling repo
+like `tpt-nexus`), depend on `tpt-telos-sdk` instead of the six pipeline crates
+directly. It exposes a one-call pipeline plus hint formatting and a build step:
+
+```rust
+use tpt_telos_sdk::{compile, format_outcome_hints, StaticAgent};
+
+let artifact = compile(source, &StaticAgent::new())?;
+// artifact.all_verified, artifact.outcomes, artifact.project, artifact.manifest
+let hints = format_outcome_hints(&artifact.outcomes); // counterexample -> text
+```
+
+Verification *failure* is **not** an error — it is reported via
+`VerifiedArtifact::all_verified`. `SdkError` is only for pipeline failures (parse,
+transpile, codegen). See `crates/tpt-telos-sdk/examples/sdk_usage.rs` for a runnable
+example (`cargo run -p tpt-telos-sdk --example sdk_usage`).

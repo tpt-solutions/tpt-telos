@@ -94,3 +94,44 @@ jobs:
         run: cargo clippy --workspace --all-targets --features ${{ matrix.features }} -- -D warnings
       - name: Test
         run: cargo test --workspace --features ${{ matrix.features }}
+
+  msrv:
+    name: Minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.74.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - name: Build (MSRV)
+        run: cargo build --workspace
+
+  doc-consistency:
+    name: Documentation consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check crate count and version labels match Cargo.toml
+        run: |
+          set -euo pipefail
+          version="$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
+          echo "workspace version: $version"
+
+          # The grammar header must track the workspace version (v<version>).
+          grep -q "v${version}" crates/tpt-telos-parser/src/grammar.ebnf \
+            || { echo "grammar.ebnf version label is out of sync with Cargo.toml"; exit 1; }
+
+          # Docs must not claim the old crate count.
+          for f in README.md ARCHITECTURE.md CONTRIBUTING.md; do
+            if grep -qi 'eight .*crates' "$f"; then
+              echo "$f still claims eight crates; update the crate table";
+              exit 1
+            fi
+          done
+
+          # Crate count documented in CONTRIBUTING/README should match members.
+          members="$(grep -c 'crates/' Cargo.toml)"
+          echo "workspace members: $members"
+          echo "doc-consistency OK"

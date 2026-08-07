@@ -238,6 +238,86 @@ fn init_creates_scaffold_file() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// All `init --template` options must produce a parseable, verifiable module.
+#[test]
+fn init_templates_all_verify() {
+    for template in [
+        "simple",
+        "dual-backend",
+        "eject",
+        "real-time",
+        "python-ml",
+        "cross-module",
+    ] {
+        let path = std::env::temp_dir().join(format!(
+            "telos_cli_init_{}_{}.telos",
+            template,
+            std::process::id()
+        ));
+        let (ok, _, stderr) = run(&[
+            "init",
+            "--module",
+            "Demo",
+            "--template",
+            template,
+            "--out",
+            path.to_str().unwrap(),
+        ]);
+        assert!(ok, "init --template {template} should exit 0: {stderr}");
+        let (vok, _, vstderr) = run(&["verify", path.to_str().unwrap()]);
+        assert!(
+            vok,
+            "init --template {template} output should verify:\n{vstderr}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[test]
+fn init_rejects_unknown_template() {
+    let path =
+        std::env::temp_dir().join(format!("telos_cli_init_bad_{}.telos", std::process::id()));
+    let (ok, _, stderr) = run(&[
+        "init",
+        "--module",
+        "Demo",
+        "--template",
+        "nope",
+        "--out",
+        path.to_str().unwrap(),
+    ]);
+    assert!(!ok, "init should exit non-zero on unknown template");
+    assert!(
+        stderr.contains("unknown template"),
+        "expected unknown-template error:\n{stderr}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// `telos new` scaffolds a project directory (module + README) that verifies.
+#[test]
+fn new_scaffolds_verifiable_project() {
+    let dir = std::env::temp_dir().join(format!("telos_cli_new_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (ok, _, stderr) = run(&[
+        "new",
+        "--name",
+        "MyProj",
+        "--out-dir",
+        dir.to_str().unwrap(),
+        "--template",
+        "simple",
+    ]);
+    assert!(ok, "new should exit 0: {stderr}");
+    let telos = dir.join("MyProj.telos");
+    let readme = dir.join("README.md");
+    assert!(telos.exists(), "expected {telos:?}");
+    assert!(readme.exists(), "expected {readme:?}");
+    let (vok, _, vstderr) = run(&["verify", telos.to_str().unwrap()]);
+    assert!(vok, "scaffolded project should verify:\n{vstderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---- --json output tests ----
 
 #[test]

@@ -45,7 +45,7 @@ Do not lower the threshold.
 
 ## Crate layout
 
-The workspace contains eight crates under `crates/`. Each has a focused role in the pipeline:
+The workspace contains ten members under `crates/`. Each has a focused role in the pipeline:
 
 | Crate | Role |
 |---|---|
@@ -57,6 +57,8 @@ The workspace contains eight crates under `crates/`. Each has a focused role in 
 | `tpt-telos-codegen` | Verified candidates → Rust / Go / Python source |
 | `tpt-telos-lsp` | JSON-RPC 2.0 LSP server |
 | `tpt-telos` | CLI binary (`telos`) |
+| `tpt-telos-sdk` | Programmatic orchestration API for integrators |
+| `out-telos-wasm` | WASM bindings for the browser playground |
 
 See `CLAUDE.md` for a detailed description of each crate and the full pipeline data flow.
 

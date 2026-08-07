@@ -97,6 +97,14 @@ fn merge_keys(a: &HashMap<String, i128>, b: &HashMap<String, i128>) -> Vec<Strin
 
 /// Returns true iff the constraint set is unsatisfiable (over the reals).
 ///
+/// This is **sound**: it will never report a set as unsatisfiable when it is
+/// satisfiable. Coefficients are tracked in `i128`; if Fourier-Motzkin
+/// elimination overflows `i128` on adversarial integer bounds, the elimination
+/// is no longer trustworthy, so the result conservatively degrades to
+/// *satisfiable* (i.e. "could not prove a contradiction") rather than risking a
+/// spurious one. Callers that need to distinguish a genuine satisfiable result
+/// from an overflow-aborted one should use [`unsat_checked`].
+///
 /// # Examples
 ///
 /// ```
@@ -113,6 +121,35 @@ fn merge_keys(a: &HashMap<String, i128>, b: &HashMap<String, i128>) -> Vec<Strin
 /// assert!(!unsat(&[ge0]));
 /// ```
 pub fn unsat(cs: &[Constraint]) -> bool {
+    unsat_checked(cs).unwrap_or(false)
+}
+
+/// Like [`unsat`], but returns `None` when the `i128` coefficients overflow
+/// during Fourier-Motzkin elimination and the result can no longer be trusted.
+///
+/// This is the explicit "bounds too large to decide" path: `Some(true)` means
+/// the set is genuinely unsatisfiable, `Some(false)` means it is satisfiable,
+/// and `None` means the constraints involve integer magnitudes beyond what the
+/// exact linear solver can handle (use `--solver z3` for exact nonlinear
+/// arithmetic, or scale the constants down). See [`unsat`] for the
+/// conservative default used by the verification pipeline.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::unsat_checked;
+///
+/// // x >= 1  and  x <= 0  is a contradiction.
+/// let ge1 = Constraint(Linear::var("x").sub(&Linear::constant_only(1)), Relation::Ge);
+/// let le0 = Constraint(Linear::var("x"), Relation::Le);
+/// assert_eq!(unsat_checked(&[ge1, le0]), Some(true));
+///
+/// // x >= 0  alone is satisfiable.
+/// let ge0 = Constraint(Linear::var("x"), Relation::Ge);
+/// assert_eq!(unsat_checked(&[ge0]), Some(false));
+/// ```
+pub fn unsat_checked(cs: &[Constraint]) -> Option<bool> {
     let mut ineqs = to_inequalities(cs);
 
     // collect variable names
@@ -157,12 +194,12 @@ pub fn unsat(cs: &[Constraint]) -> bool {
                 for k in keys {
                     let bi = *uc.get(&k).unwrap_or(&0);
                     let ei = *lc.get(&k).unwrap_or(&0);
-                    let coeff = e * bi - a * ei;
+                    let coeff = e.checked_mul(bi)?.checked_sub(a.checked_mul(ei)?)?;
                     if coeff != 0 {
                         coeffs.insert(k, coeff);
                     }
                 }
-                let c = e * b - a * d;
+                let c = e.checked_mul(*b)?.checked_sub(a.checked_mul(*d)?)?;
                 new_ineqs.push(LinIneq { coeffs, c });
             }
         }
@@ -171,10 +208,10 @@ pub fn unsat(cs: &[Constraint]) -> bool {
 
     for ineq in &ineqs {
         if ineq.coeffs.is_empty() && ineq.c < 0 {
-            return true;
+            return Some(true);
         }
     }
-    false
+    Some(false)
 }
 
 /// Negate a conclusion into one or more branches (each a conjunction of
@@ -786,6 +823,47 @@ mod extended_tests {
         ];
         let m = model(&cs).expect("should be satisfiable");
         assert!(satisfies_model(&cs, &m), "model {m:?} invalid");
+    }
+
+    #[test]
+    fn unsat_checked_overflow_is_conservative() {
+        // Chain of variables each bounded to zero by `>= 0 && <= 0`, linked by
+        // `-m*v_i - m*v_{i+1} <= 0` constraints. Eliminating the linked variable
+        // multiplies an `i128` coefficient near `i64::MAX^2` by another
+        // `i64::MAX`, which overflows `i128`. The contradiction (last var >= 1)
+        // is genuine, but fixed-width Fourier-Motzkin can no longer be trusted,
+        // so `unsat_checked` must report `None` (undecided) and `unsat` must not
+        // claim a (possibly spurious) unsatisfiability.
+        let m = i64::MAX;
+        let n = 5; // variables v0..v4
+        let mut cs = Vec::new();
+        for i in 0..n {
+            let vi = format!("v{i}");
+            // v_i >= 0  (lower for v_i)
+            cs.push(c(&[(vi.as_str(), -m)], 0, Relation::Le));
+            // v_i <= 0  (upper for v_i) — together force v_i == 0
+            cs.push(c(&[(vi.as_str(), m)], 0, Relation::Le));
+            if i + 1 < n {
+                let vj = format!("v{}", i + 1);
+                // m*v_i + m*v_{i+1} <= 0  — an UPPER for v_i that chains a huge
+                // coefficient forward so the next elimination multiplies an
+                // `i128` near `i64::MAX^2` by another `i64::MAX` (overflows).
+                cs.push(c(&[(vi.as_str(), m), (vj.as_str(), m)], 0, Relation::Le));
+            }
+        }
+        // contradiction: v_{n-1} >= 1  (but all v_i are forced to 0)
+        let last = format!("v{}", n - 1);
+        cs.push(c(&[(last.as_str(), -m)], m, Relation::Le));
+
+        assert_eq!(
+            unsat_checked(&cs),
+            None,
+            "overflow must degrade to undecided"
+        );
+        assert!(
+            !unsat(&cs),
+            "unsat must be conservative (never a spurious contradiction)"
+        );
     }
 }
 

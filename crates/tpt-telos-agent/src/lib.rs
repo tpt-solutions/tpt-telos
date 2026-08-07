@@ -117,7 +117,11 @@ const MAX_ITERS: usize = 8;
 
 /// Build the verification problem for a candidate body by substituting it into
 /// the module (preserving the module's invariants and routing metadata).
-fn problem_for(module: &Module, func_idx: usize, stmts: &[Stmt]) -> VerificationProblem {
+fn problem_for(
+    module: &Module,
+    func_idx: usize,
+    stmts: &[Stmt],
+) -> Result<VerificationProblem, String> {
     let mut module = module.clone();
     module.items[func_idx] = match &module.items[func_idx] {
         Item::Func(f) => {
@@ -128,12 +132,11 @@ fn problem_for(module: &Module, func_idx: usize, stmts: &[Stmt]) -> Verification
         }
         other => other.clone(),
     };
-    let problems =
-        extract(&[module.clone()]).expect("re-extraction of a well-formed spec must succeed");
-    problems
+    let problems = extract(&[module.clone()])?;
+    Ok(problems
         .into_iter()
         .find(|p| p.func_name == module.items[func_idx].func_name())
-        .expect("extracted problem for the transpiled function")
+        .expect("extracted problem for the transpiled function"))
 }
 
 fn find_counterexample(
@@ -199,7 +202,7 @@ pub fn transpile_func(
     let mut iterations = Vec::new();
 
     for iter in 0..MAX_ITERS {
-        let problem = problem_for(module, func_idx, &candidate.stmts);
+        let problem = problem_for(module, func_idx, &candidate.stmts)?;
         let result = verify(&problem);
         let passed = result.all_passed;
 
@@ -238,7 +241,7 @@ pub fn transpile_func(
             // Agent could not improve further; synthesize from the contract as a
             // correct-by-construction fallback so the loop terminates.
             let syn = static_agent::synthesize_from_ensures(&spec);
-            let syn_problem = problem_for(module, func_idx, &syn.stmts);
+            let syn_problem = problem_for(module, func_idx, &syn.stmts)?;
             let syn_result = verify(&syn_problem);
             iterations.push(LoopStep {
                 iteration: iter + 1,
@@ -262,7 +265,7 @@ pub fn transpile_func(
     }
 
     // Loop exhausted without a proof; return the last candidate for diagnostics.
-    let problem = problem_for(module, func_idx, &candidate.stmts);
+    let problem = problem_for(module, func_idx, &candidate.stmts)?;
     let result = verify(&problem);
     Ok(FuncOutcome {
         func_name: func.name.clone(),

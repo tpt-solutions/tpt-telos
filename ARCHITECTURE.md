@@ -26,6 +26,8 @@ Source (.telos) → Parser → AST → IR/Constraint Extraction → QF_LRA Verif
 | `tpt-telos-codegen` | Rust, Go, Python backends; FFI bridge; eject hatch; proof manifest |
 | `tpt-telos-lsp` | JSON-RPC 2.0 language server over stdio |
 | `tpt-telos` | CLI binary (`telos`) |
+| `tpt-telos-sdk` | Programmatic orchestration API (one-call pipeline, hints, build) |
+| `out-telos-wasm` | WASM bindings (`parser` + `verifier`) for the browser playground |
 
 ## Go GC Determinism
 

@@ -83,6 +83,9 @@ pub enum DiagnosticKind {
     ZeroAllocPythonConflict,
     /// An `@state(...)` attribute contained an unrecognized value (possible typo).
     UnrecognizedStateValue,
+    /// An `@boundary(...)` attribute contained an unrecognized flag (possible typo),
+    /// so it was ignored and the module defaulted to Rust.
+    UnrecognizedBoundaryFlag,
 }
 
 /// The storage class for a module's data structures, derived from
@@ -224,6 +227,7 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
     let mut go_hits = Vec::new();
     let mut rust_hits = Vec::new();
     let mut python_hits = Vec::new();
+    let mut unrecognized_flags = Vec::new();
     for f in &flags {
         if PYTHON_FLAGS.contains(&f.as_str()) {
             python_hits.push(f.clone());
@@ -231,6 +235,8 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
             go_hits.push(f.clone());
         } else if RUST_FLAGS.contains(&f.as_str()) {
             rust_hits.push(f.clone());
+        } else {
+            unrecognized_flags.push(f.clone());
         }
     }
 
@@ -271,6 +277,20 @@ pub fn route_checked(attrs: &[Attribute], module_name: &str) -> (Route, Vec<Rout
                 "module `{}` has unrecognized `@state({})` value; \
                  valid values are `persistent` and `ephemeral` (defaulting to ephemeral)",
                 module_name, bad_val
+            ),
+        });
+    }
+
+    for bad_flag in &unrecognized_flags {
+        diagnostics.push(RoutingDiagnostic {
+            kind: DiagnosticKind::UnrecognizedBoundaryFlag,
+            module: module_name.to_string(),
+            message: format!(
+                "module `{}` has unrecognized `@boundary({})` flag; \
+                 valid flags are cpu_bound, zero_allocation, crypto, real_time, \
+                 network_io, high_concurrency, distributed, high_latency, \
+                 ml_training, python, jax (ignored; defaulting to Rust backend)",
+                module_name, bad_flag
             ),
         });
     }
@@ -469,6 +489,15 @@ mod tests {
         // Unknown flags contribute nothing; the default compute backend applies.
         let r = route(&[attr(&["some_future_flag"])]);
         assert_eq!(r.target, Target::Rust);
+    }
+
+    #[test]
+    fn unrecognised_boundary_flag_emits_diagnostic() {
+        let (r, diags) = route_checked(&[attr(&["some_future_flag"])], "MyModule");
+        assert_eq!(r.target, Target::Rust);
+        assert!(diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::UnrecognizedBoundaryFlag));
     }
 
     #[test]

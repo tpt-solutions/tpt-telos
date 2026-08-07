@@ -1,4 +1,4 @@
-Formal Grammar for tpt-telos (v0.2.0)
+Formal Grammar for tpt-telos (v0.1.1)
 =======================================
 
 --------------------------------------------------------------------------------
@@ -17,7 +17,7 @@ SUPPORTED (verifier + all backends):
   Field paths             e.g. wallet.balance, s.pressure
   Invariant types         invariant T { constraint }  (checked at entry + post-mutate)
   Refinement type         PositiveInt      (built-in; treated as Int with balance >= 0 premise)
-  Module attributes       @boundary(...)   (routing), @state(...)  (storage class, parsed only)
+  Module attributes       @boundary(...)   (routing), @state(...)  (storage class: persistent|ephemeral)
   Function attributes     @eject           (compile as trusted opaque + contract guard)
   Routing flags           cpu_bound  zero_allocation  crypto  real_time      → Rust
                           network_io  high_concurrency  distributed  high_latency → Go

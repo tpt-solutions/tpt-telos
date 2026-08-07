@@ -934,24 +934,36 @@ fn assign_constraint(
     field_fn: &Naming,
     var_fn: &dyn Fn(&str) -> String,
 ) -> Result<Constraint, String> {
-    let (base, field) = match &a.target {
-        Expr::Field { base, field } => (base.clone(), field.clone()),
-        other => {
-            return Err(format!(
-                "assignment target must be a field, found {:?}",
-                other
-            ))
+    match &a.target {
+        Expr::Field { base, field } => {
+            let post = Linear::var(&post_field(base, field));
+            let pre = Linear::var(&pre_field(base, field));
+            let value = linearize(&a.value, field_fn, var_fn)?;
+            let (terms, rel) = match a.op {
+                AssignOp::Set => (post.sub(&value), Relation::Eq),
+                AssignOp::Add => (post.sub(&pre).sub(&value), Relation::Eq),
+                AssignOp::Sub => (post.sub(&pre).add(&value), Relation::Eq),
+            };
+            Ok(Constraint(terms, rel))
         }
-    };
-    let post = Linear::var(&post_field(&base, &field));
-    let pre = Linear::var(&pre_field(&base, &field));
-    let value = linearize(&a.value, field_fn, var_fn)?;
-    let (terms, rel) = match a.op {
-        AssignOp::Set => (post.sub(&value), Relation::Eq),
-        AssignOp::Add => (post.sub(&pre).sub(&value), Relation::Eq),
-        AssignOp::Sub => (post.sub(&pre).add(&value), Relation::Eq),
-    };
-    Ok(Constraint(terms, rel))
+        // Bare local variables (e.g. a scalar `ensures out == ...` output bound
+        // by `out = ...;`) have no pre/post-state distinction in this IR — they
+        // resolve through the same `var_fn` identity naming used for `ensures`
+        // conclusions, so a plain `=` just binds that symbol directly.
+        Expr::Var(name) if a.op == AssignOp::Set => {
+            let target = Linear::var(&var_fn(name));
+            let value = linearize(&a.value, field_fn, var_fn)?;
+            Ok(Constraint(target.sub(&value), Relation::Eq))
+        }
+        Expr::Var(name) => Err(format!(
+            "compound assignment ('+='/'-=') to local variable '{}' is not supported; use '='",
+            name
+        )),
+        other => Err(format!(
+            "assignment target must be a field or local variable, found {:?}",
+            other
+        )),
+    }
 }
 
 /// Collect every `Field { base, field }` referenced in an expression.
