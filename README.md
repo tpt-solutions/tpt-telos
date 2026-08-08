@@ -16,7 +16,7 @@ Every `func` carries `requires`/`ensures` contracts that are extracted to
 Fourier–Motzkin SMT-style solver — **no external Z3 dependency** is required to
 build or run.
 
-> **Status:** v1.2, Phase 7 and Phase 8 complete (see [`TODO.md`](TODO.md)).
+> **Status:** v0.2.0 — Phases 7–10 complete (see [`TODO.md`](TODO.md)).
 > Counterexamples are surfaced by `telos verify`/`build` and the LSP; structs,
 > enums, bounded `forall`/aggregates, disjunction, and modular `Call`/
 > `MethodCall` verification are all wired into `tpt-telos-ir`/`tpt-telos-codegen`.

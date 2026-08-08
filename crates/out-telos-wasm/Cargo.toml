@@ -1,6 +1,6 @@
 [package]
 name = "out-telos-wasm"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "WASM bindings for the tpt-telos parser and verifier (browser playground)"
 license = "MIT OR Apache-2.0"

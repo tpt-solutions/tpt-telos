@@ -186,7 +186,7 @@
     enabled, verification uses Z3 instead of Fourier-Motzkin. The `negate`
     function in `solver.rs` was made `pub` to support this dispatch.
 
-## Status: tpt-telos v1.2 — Phases 7–10 complete.
+## Status: tpt-telos v0.2.0 — Phases 7–10 complete.
 
 The full pipeline is in place: parser -> IR/constraint extraction -> SMT-style
 verifier -> agentic transpiler (Generate -> Verify -> Counter-example ->

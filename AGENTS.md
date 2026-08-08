@@ -1,6 +1,6 @@
 # AGENTS.md — tpt-telos
 
-Rust Cargo workspace. The `telos` binary (crate `tpt-telos`) is the compiler frontend. The full pipeline narrative lives in `TODO.md`.
+Rust Cargo workspace, version **0.2.0** (see `Cargo.toml` `[workspace.package]`). The `telos` binary (crate `tpt-telos`) is the compiler frontend. The full pipeline narrative lives in `TODO.md`.
 
 > **Historical archives:** `history/TODO 1260723.md` and `history/TODO 1260713.md` are
 > intentional historical snapshots (they reference pre-rename crate paths like
@@ -30,6 +30,8 @@ The CLI needs no network by default: the offline `StaticAgent` runs unless `--ll
 - `tpt-telos-codegen` — `generate_program` (Rust), `generate_project` (dual backend + FFI), `eject.rs`.
 - `tpt-telos-lsp` — JSON-RPC 2.0 server over stdio (`Content-Length` framing).
 - `tpt-telos` — the `telos` binary.
+- `tpt-telos-sdk` — programmatic orchestration API (`compile`/`compile_static`, `format_outcome_hints`, `compile_project`) for integrators.
+- `out-telos-wasm` — WASM bindings over `parser` + `verifier` for the browser playground (`publish = false`).
 
 ## Routing & attributes
 - `@boundary(...)` on a module picks the backend: `cpu_bound` / `zero_allocation` / `crypto` / `real_time` → Rust; `network_io` / `high_concurrency` / `distributed` / `high_latency` → Go. Any Go flag wins; unannotated defaults to **Rust**.

@@ -55,7 +55,7 @@ with an enforced 75% line-coverage floor.
 
 ## Workspace layout
 
-Nine crates under `crates/`, each with a focused responsibility in the pipeline:
+Ten crates under `crates/` (currently version **0.2.0**, see `Cargo.toml` `[workspace.package]`), each with a focused responsibility in the pipeline:
 
 - **tpt-telos-parser** — hand-written lexer/parser/AST for `.telos` source. Grammar is the source of truth
   at `crates/tpt-telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
