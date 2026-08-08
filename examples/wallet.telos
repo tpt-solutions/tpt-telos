@@ -1,3 +1,11 @@
+// Showcase #1: verified financial state machine.
+//
+// The canonical tpt-telos demo: a wallet whose balance can never go negative,
+// with a `transfer` that moves funds and is proven correct via `old(...)`.
+// Run it:
+//   telos verify examples/wallet.telos
+//   telos build  examples/wallet.telos --out-dir ./gen-wallet
+
 @boundary(cpu_bound)
 module PaymentGateway {
     // A wallet balance can never be negative.

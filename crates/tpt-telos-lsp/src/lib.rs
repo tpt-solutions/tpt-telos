@@ -20,7 +20,9 @@ use std::io::{BufRead, Write};
 use serde_json::{json, Value};
 
 pub use analysis::{
-    analyze, code_actions, diagnostics, format_source, hover_markdown, Diagnostic, QuickFix,
+    analyze, build_index, code_actions, completion_items, definition_at, diagnostics,
+    format_source, hover_markdown, inlay_hints, references_at, word_at_pos, Diagnostic, InlayHint,
+    Location, QuickFix, SymKind, Symbol, SymbolIndex,
 };
 
 /// The language server state: open documents and lifecycle flags.
@@ -122,7 +124,11 @@ impl Server {
                         "textDocumentSync": 1,
                         "hoverProvider": true,
                         "codeActionProvider": true,
-                        "documentFormattingProvider": true
+                        "documentFormattingProvider": true,
+                        "definitionProvider": true,
+                        "referencesProvider": true,
+                        "completionProvider": { "triggerCharacters": [".", "("] },
+                        "inlayHintProvider": true
                     },
                     "serverInfo": { "name": "telos-lsp", "version": env!("CARGO_PKG_VERSION") }
                 }),
@@ -267,6 +273,76 @@ impl Server {
                 };
                 vec![response(id, result)]
             }
+            "textDocument/definition" => {
+                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+                let line = msg["params"]["position"]["line"].as_u64().unwrap_or(0) as usize;
+                let ch = msg["params"]["position"]["character"].as_u64().unwrap_or(0) as usize;
+                let docs = self.index_docs();
+                let out = self
+                    .documents
+                    .get(uri)
+                    .and_then(|text| word_at_pos(text, line, ch))
+                    .and_then(|w| {
+                        let idx = build_index(&docs);
+                        definition_at(&idx, &w)
+                    })
+                    .map(location_to_json)
+                    .unwrap_or(Value::Null);
+                vec![response(id, out)]
+            }
+            "textDocument/references" => {
+                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+                let line = msg["params"]["position"]["line"].as_u64().unwrap_or(0) as usize;
+                let ch = msg["params"]["position"]["character"].as_u64().unwrap_or(0) as usize;
+                let docs = self.index_docs();
+                let locations = self
+                    .documents
+                    .get(uri)
+                    .and_then(|text| word_at_pos(text, line, ch))
+                    .map(|w| {
+                        let idx = build_index(&docs);
+                        references_at(&idx, &w)
+                            .into_iter()
+                            .map(location_to_json)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                vec![response(id, json!(locations))]
+            }
+            "textDocument/completion" => {
+                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+                let items = match self.documents.get(uri) {
+                    Some(_) => {
+                        let docs = self.index_docs();
+                        let idx = build_index(&docs);
+                        completion_items(&idx)
+                            .into_iter()
+                            .map(|(label, kind)| json!({ "label": label, "kind": kind }))
+                            .collect::<Vec<_>>()
+                    }
+                    None => Vec::new(),
+                };
+                vec![response(id, json!(items))]
+            }
+            "textDocument/inlayHint" => {
+                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+                let hints = self
+                    .documents
+                    .get(uri)
+                    .map(|text| inlay_hints(text, uri))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|h| {
+                        json!({
+                            "position": { "line": h.line, "character": h.character },
+                            "label": h.label,
+                            "kind": h.kind,
+                            "paddingLeft": true
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                vec![response(id, json!(hints))]
+            }
             _ => {
                 if id.is_some() {
                     vec![error_response(
@@ -288,6 +364,15 @@ impl Server {
             .map(|text| diagnostics(text))
             .unwrap_or_default();
         publish_diagnostics(uri, &diags)
+    }
+
+    /// Snapshot of all open documents as `(uri, text)` pairs, for the workspace
+    /// symbol index.
+    fn index_docs(&self) -> Vec<(String, String)> {
+        self.documents
+            .iter()
+            .map(|(u, t)| (u.clone(), t.clone()))
+            .collect()
     }
 }
 
@@ -391,6 +476,16 @@ fn publish_diagnostics(uri: &str, diags: &[Diagnostic]) -> Value {
         "jsonrpc": "2.0",
         "method": "textDocument/publishDiagnostics",
         "params": { "uri": uri, "diagnostics": items }
+    })
+}
+
+fn location_to_json(loc: Location) -> Value {
+    json!({
+        "uri": loc.uri,
+        "range": {
+            "start": { "line": loc.line, "character": loc.character },
+            "end": { "line": loc.end_line, "character": loc.end_character }
+        }
     })
 }
 
@@ -542,5 +637,80 @@ mod tests {
             }
         }));
         assert_eq!(out[0]["method"], json!("textDocument/publishDiagnostics"));
+    }
+
+    #[test]
+    fn handle_definition_resolves_to_func() {
+        let mut s = Server::new();
+        let src = "module M {\n    func f() ;\n    func g() { f() }\n}";
+        s.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "u", "text": src } }
+        }));
+        // Cursor on the call `f()` (line 2, column 15).
+        let out = s.handle(&json!({
+            "jsonrpc": "2.0", "id": 9, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": "u" }, "position": { "line": 2, "character": 15 } }
+        }));
+        let loc = &out[0]["result"];
+        assert_eq!(loc["uri"], json!("u"));
+        // Definition is on line 1 (0-based) where `func f` is declared.
+        assert_eq!(loc["range"]["start"]["line"], json!(1));
+    }
+
+    #[test]
+    fn handle_references_finds_call_site() {
+        let mut s = Server::new();
+        let src = "module M {\n    func f() ;\n    func g() { f() }\n}";
+        s.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "u", "text": src } }
+        }));
+        let out = s.handle(&json!({
+            "jsonrpc": "2.0", "id": 10, "method": "textDocument/references",
+            "params": { "textDocument": { "uri": "u" }, "position": { "line": 1, "character": 9 } }
+        }));
+        let locs = out[0]["result"].as_array().unwrap();
+        // definition + the call site.
+        assert_eq!(locs.len(), 2);
+        assert!(locs.iter().any(|l| l["range"]["start"]["line"] == json!(2)));
+    }
+
+    #[test]
+    fn handle_completion_lists_symbols() {
+        let mut s = Server::new();
+        let src = "module M {\n    func f() ;\n    func g() { f() }\n}";
+        s.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "u", "text": src } }
+        }));
+        let out = s.handle(&json!({
+            "jsonrpc": "2.0", "id": 11, "method": "textDocument/completion",
+            "params": { "textDocument": { "uri": "u" } }
+        }));
+        let items = out[0]["result"].as_array().unwrap();
+        let labels: Vec<&str> = items.iter().map(|i| i["label"].as_str().unwrap()).collect();
+        assert!(labels.contains(&"f"));
+        assert!(labels.contains(&"g"));
+    }
+
+    #[test]
+    fn handle_inlay_hints_shows_routing_target() {
+        let mut s = Server::new();
+        let src = "module M {\n    func f() ;\n}";
+        s.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "u", "text": src } }
+        }));
+        let out = s.handle(&json!({
+            "jsonrpc": "2.0", "id": 12, "method": "textDocument/inlayHint",
+            "params": { "textDocument": { "uri": "u" }, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 2, "character": 0 } } }
+        }));
+        let hints = out[0]["result"].as_array().unwrap();
+        assert!(!hints.is_empty());
+        // Module line gets a routing-target hint.
+        assert!(hints
+            .iter()
+            .any(|h| h["label"].as_str().unwrap().contains("→")));
     }
 }

@@ -299,8 +299,11 @@ Phase 7 additions:
 ### Documentation integrity
 - [x] Fix Phase 8's intro line (says most items are "proposed follow-ups, not yet implemented"
   while every item below is checked `[x]`) — resolve the inconsistency one way or the other.
-- [ ] Remove stray duplicate `TODO 126071x.md`-style files at repo root if confirmed to be
-  accidental artifacts.
+- [x] Remove stray duplicate `TODO 126071x.md`-style files at repo root if confirmed to be
+  accidental artifacts. (Audited: the only `TODO*.md` at the repo root is `TODO.md`
+  itself — the historical `history/TODO 1260723.md` / `history/TODO 1260713.md` snapshots
+  are intentional archives per `AGENTS.md` and were left in place. A leftover scratch repro
+  `examples/_repro_scalar.telos` was also cleaned up as an accidental artifact.)
 - [x] Add `examples/README.md` indexing all 12 `.telos` fixtures (one line each: what it
    demonstrates), since several fixture comments (`float.telos`, `array_test.telos`) qualify
    claims made in Phase 6 that aren't visible from TODO.md alone.
@@ -428,16 +431,15 @@ Phase 7 additions:
 - [x] **`collect_verify_output` JSON group-awareness — verified correct** — audited: `verify()`
   computes `all_passed` via `any_passed` per disjunction group, and `collect_verify_output` reads
   that field (not per-check `passed`), so JSON `overall` already honors disjunction groups. No change.
-- [ ] **`assign_constraint` rejects bare local-variable assignment targets** — only `Expr::Field`
-  targets are accepted; `Stmt::Assign` to a bare `Expr::Var` (e.g. a scalar `ensures out == a + b`
-  output bound by `out = a + b;`) returns `Err`. Reachable from the default offline `StaticAgent`:
-  `synthesize_from_ensures` deliberately emits exactly this shape for scalar (non-field) `ensures`
-  clauses. (`crates/tpt-telos-ir/src/extract.rs`, `assign_constraint`)
-- [ ] **`problem_for` panics instead of returning `Result`** — `tpt-telos-agent`'s re-extraction
-  step (`.expect("re-extraction of a well-formed spec must succeed")`) turns the `assign_constraint`
-  gap above into a hard process panic on the *first* verify attempt for any elided-body function
-  with a scalar `ensures` clause, instead of a normal pipeline error; no `--features llm` needed to
-  hit it. (`crates/tpt-telos-agent/src/lib.rs`, `problem_for`)
+- [x] **`assign_constraint` accepts bare local-variable assignment targets** — `Stmt::Assign` to a
+  bare `Expr::Var` (e.g. a scalar `ensures out == a + b` output bound by `out = a + b;`) is now
+  lowered into a pre/post-state-independent equality constraint, so the default offline
+  `StaticAgent` can synthesize scalar `ensures` clauses. (`crates/tpt-telos-ir/src/extract.rs`,
+  `assign_constraint` `Expr::Var` arm; locked in by `transpile_scalar_out_ensures_verifies` in
+  `crates/tpt-telos-agent/tests/static_agent.rs`.)
+- [x] **`problem_for` returns `Result` instead of panicking** — the re-extraction step now uses
+  `ok_or_else(...)` to surface an internal extraction failure as a normal `Err` rather than a hard
+  process panic on the first verify attempt. (`crates/tpt-telos-agent/src/lib.rs`, `problem_for`)
 
 ### Adoption: templates, examples, SDK docs
 - [x] **New `init --template` options** — added `real-time`, `python-ml`, `cross-module`
@@ -455,13 +457,16 @@ Phase 7 additions:
 - [x] **CI doc-consistency check** — `.github/workflows/ci.yml` now asserts crate count +
   version labels in README/ARCHITECTURE/CONTRIBUTING/grammar.ebnf match `Cargo.toml`.
 - [x] **MSRV job** — `.github/workflows/ci.yml` enforces `rust-version = 1.74` (dtolnay/rust-toolchain@1.74.0).
-- [ ] **Playground deploy job** — build `out-telos-wasm` and publish a static `playground/`
-  site to GitHub Pages. (`playground/`, `.github/workflows/`)
+- [x] **Playground deploy job** — build `out-telos-wasm` and publish a static `playground/`
+  site to GitHub Pages. (`playground/`, `.github/workflows/playground.yml`)
 
 ### Innovation (open)
-- [ ] **LSP symbol index** — wire `textDocument/definition` / `references` / `completion` from a
-  workspace-wide symbol table; add inlay hints for `old(...)` values and routing target.
-  (`crates/tpt-telos-lsp/`)
-- [ ] **Hosted browser playground** — minimal `playground/` static site (textarea + live
-  `verify` output + counterexample display) over `out-telos-wasm`. (`playground/`)
+- [x] **LSP symbol index** — `textDocument/definition` / `references` / `completion` are wired
+  from a workspace-wide symbol table (`build_index` over all open documents), and inlay hints show
+  the module's routing target plus `old(...)` `pre-state` markers.
+  (`crates/tpt-telos-lsp/src/analysis.rs`, `crates/tpt-telos-lsp/src/lib.rs`)
+- [x] **Hosted browser playground** — minimal `playground/` static site (textarea + live
+  `verify` output + counterexample display) over `out-telos-wasm`, deployed by the Playground
+  workflow. (`playground/index.html`, `playground/main.js`, `playground/style.css`,
+  `.github/workflows/playground.yml`)
 

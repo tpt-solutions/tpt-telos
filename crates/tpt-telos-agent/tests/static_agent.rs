@@ -221,6 +221,52 @@ fn generate_synthesizes_when_elided() {
 }
 
 #[test]
+fn transpile_scalar_out_ensures_verifies() {
+    // Regression: an elided function with a scalar `ensures out == a + b`
+    // clause produces a bare `out = a + b;` local assignment. The IR extractor
+    // must accept a bare `Expr::Var` assignment target via `assign_constraint`
+    // and `problem_for` must surface any internal extraction failure as a
+    // normal `Err` (never a panic).
+    let func = func_with(
+        "out",
+        vec![
+            Param {
+                name: "a".into(),
+                ty: Type::Named("Int".into()),
+                mutability: ParamMutability::Immutable,
+            },
+            Param {
+                name: "b".into(),
+                ty: Type::Named("Int".into()),
+                mutability: ParamMutability::Immutable,
+            },
+        ],
+        vec![
+            bin(BinOp::Ge, var("a"), int(0)),
+            bin(BinOp::Ge, var("b"), int(0)),
+        ],
+        vec![bin(
+            BinOp::Eq,
+            var("out"),
+            bin(BinOp::Add, var("a"), var("b")),
+        )],
+        vec![],
+        true,
+    );
+    let module = Module {
+        attributes: vec![],
+        name: "M".to_string(),
+        items: vec![Item::Func(func)],
+    };
+    let outcome = transpile_func(&module, 0, &StaticAgent::new()).unwrap();
+    assert!(
+        outcome.verified,
+        "scalar out should verify: {:?}",
+        outcome.result
+    );
+}
+
+#[test]
 fn rewrite_fixes_broken_field_from_counter_example() {
     // Broken body: `from.balance += amount` (should be `-=`).
     let broken = Candidate {

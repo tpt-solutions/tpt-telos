@@ -1,7 +1,11 @@
-// A dual-backend microservice: a CPU-bound ledger (compiled to Rust) and a
-// network-facing gateway API (compiled to Go). The tpt-telos compiler routes
-// each module to its target backend and generates the FFI bridge that lets them
-// call each other with no hand-written glue.
+// Showcase #3: dual-backend microservice + automatic FFI bridge.
+//
+// A CPU-bound ledger (compiled to Rust) and a network-facing gateway API
+// (compiled to Go). The tpt-telos compiler routes each module to its target
+// backend and generates the FFI bridge that lets them call each other with no
+// hand-written glue. Run it:
+//   telos verify examples/microservice.telos
+//   telos project examples/microservice.telos --check
 
 @boundary(cpu_bound, zero_allocation)
 module Ledger {

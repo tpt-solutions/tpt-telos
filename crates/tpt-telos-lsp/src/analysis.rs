@@ -818,3 +818,325 @@ fn fmt_indent(s: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+// ---------------------------------------------------- workspace symbol index
+
+/// Classification of a workspace symbol, mapped to LSP `SymbolKind` codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymKind {
+    Func,
+    Invariant,
+    Struct,
+    Enum,
+    Param,
+}
+
+impl SymKind {
+    /// The numeric `SymbolKind` code used in `textDocument/documentSymbol` and
+    /// completion items.
+    pub fn code(self) -> u8 {
+        match self {
+            SymKind::Func => 12,
+            SymKind::Invariant => 5,
+            SymKind::Struct => 23,
+            SymKind::Enum => 10,
+            SymKind::Param => 13,
+        }
+    }
+}
+
+/// A definition site for a named symbol in a `.telos` document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+    pub name: String,
+    pub kind: SymKind,
+    pub uri: String,
+    pub line: usize,
+    pub character: usize,
+    pub end_character: usize,
+}
+
+/// A use site of a name (e.g. a `func`-call expression), distinct from its
+/// definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    pub name: String,
+    pub uri: String,
+    pub line: usize,
+    pub character: usize,
+    pub end_character: usize,
+}
+
+/// A resolved source location (LSP `Location`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    pub uri: String,
+    pub line: usize,
+    pub character: usize,
+    pub end_line: usize,
+    pub end_character: usize,
+}
+
+/// An inlay hint rendered at a source position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlayHint {
+    pub line: usize,
+    pub character: usize,
+    pub label: String,
+    /// LSP `InlayHintKind`: 1 = type, 2 = parameter.
+    pub kind: u8,
+}
+
+/// A symbol table spanning every open document (a minimal workspace index).
+#[derive(Debug, Clone, Default)]
+pub struct SymbolIndex {
+    pub symbols: Vec<Symbol>,
+    pub references: Vec<Reference>,
+}
+
+/// A scanned identifier/operator token with its byte offset.
+struct Tok {
+    text: String,
+    offset: usize,
+    len: usize,
+    kind: TokKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokKind {
+    Word,
+    Other,
+}
+
+fn scan_tokens(text: &str) -> Vec<Tok> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut toks = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c.is_ascii_alphanumeric() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            toks.push(Tok {
+                text: word,
+                offset: start,
+                len: i - start,
+                kind: TokKind::Word,
+            });
+        } else {
+            toks.push(Tok {
+                text: c.to_string(),
+                offset: i,
+                len: 1,
+                kind: TokKind::Other,
+            });
+            i += 1;
+        }
+    }
+    toks
+}
+
+fn is_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "module"
+            | "func"
+            | "invariant"
+            | "struct"
+            | "enum"
+            | "requires"
+            | "ensures"
+            | "mutate"
+            | "state"
+            | "let"
+            | "if"
+            | "else"
+            | "match"
+            | "return"
+            | "old"
+            | "forall"
+            | "in"
+            | "sum"
+            | "min"
+            | "max"
+            | "count"
+    )
+}
+
+fn tok_line_col(text: &str, offset: usize) -> (usize, usize) {
+    offset_to_line_col(text, offset)
+}
+
+/// Build the workspace symbol index from every open document.
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_lsp::analysis::build_index;
+///
+/// let docs = vec![(
+///     "file:///m.telos".to_string(),
+///     "module M {\n    func f(x: Int) ;\n    func g() { f(1) }\n}".to_string(),
+/// )];
+/// let idx = build_index(&docs);
+/// assert!(idx.symbols.iter().any(|s| s.name == "f" && s.kind == tpt_telos_lsp::analysis::SymKind::Func));
+/// // `f` is referenced by the call `f(1)`.
+/// assert!(idx.references.iter().any(|r| r.name == "f"));
+/// ```
+pub fn build_index(documents: &[(String, String)]) -> SymbolIndex {
+    let mut idx = SymbolIndex::default();
+    for (uri, text) in documents {
+        let toks = scan_tokens(text);
+        for (i, tok) in toks.iter().enumerate() {
+            if tok.kind != TokKind::Word || is_keyword(&tok.text) {
+                continue;
+            }
+            let prev = toks.get(i.wrapping_sub(1));
+            let prev_word = prev.filter(|_| i > 0).and_then(|t| {
+                if t.kind == TokKind::Word {
+                    Some(t.text.as_str())
+                } else {
+                    None
+                }
+            });
+            let next = toks.get(i + 1);
+            let next_text = next.map(|t| t.text.as_str()).unwrap_or("");
+            let (line, character) = tok_line_col(text, tok.offset);
+
+            let kind = match prev_word {
+                Some("func") => Some(SymKind::Func),
+                Some("invariant") => Some(SymKind::Invariant),
+                Some("struct") => Some(SymKind::Struct),
+                Some("enum") => Some(SymKind::Enum),
+                Some("(") | Some(",") if next_text == ":" => Some(SymKind::Param),
+                _ => None,
+            };
+            if let Some(k) = kind {
+                idx.symbols.push(Symbol {
+                    name: tok.text.clone(),
+                    kind: k,
+                    uri: uri.clone(),
+                    line,
+                    character,
+                    end_character: character + tok.len,
+                });
+            } else if next_text == "(" {
+                // A call/use site of a name.
+                idx.references.push(Reference {
+                    name: tok.text.clone(),
+                    uri: uri.clone(),
+                    line,
+                    character,
+                    end_character: character + tok.len,
+                });
+            }
+        }
+    }
+    idx
+}
+
+/// The identifier under the cursor, for symbol lookups.
+pub fn word_at_pos(text: &str, line: usize, character: usize) -> Option<String> {
+    word_at(text, line, character)
+}
+
+/// Resolve `word` to the location of its definition, or `None`.
+pub fn definition_at(index: &SymbolIndex, word: &str) -> Option<Location> {
+    let sym = index.symbols.iter().find(|s| s.name == word)?;
+    Some(Location {
+        uri: sym.uri.clone(),
+        line: sym.line,
+        character: sym.character,
+        end_line: sym.line,
+        end_character: sym.end_character,
+    })
+}
+
+/// All locations where `word` is used (call sites), plus its definition site.
+pub fn references_at(index: &SymbolIndex, word: &str) -> Vec<Location> {
+    let mut out = Vec::new();
+    if let Some(sym) = index.symbols.iter().find(|s| s.name == word) {
+        out.push(Location {
+            uri: sym.uri.clone(),
+            line: sym.line,
+            character: sym.character,
+            end_line: sym.line,
+            end_character: sym.end_character,
+        });
+    }
+    for r in &index.references {
+        if r.name == word {
+            out.push(Location {
+                uri: r.uri.clone(),
+                line: r.line,
+                character: r.character,
+                end_line: r.line,
+                end_character: r.end_character,
+            });
+        }
+    }
+    out
+}
+
+/// Completion items drawn from the workspace symbol table (distinct names, with
+/// their kinds).
+pub fn completion_items(index: &SymbolIndex) -> Vec<(String, u8)> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<(String, u8)> = Vec::new();
+    for s in &index.symbols {
+        if seen.insert(s.name.clone()) {
+            out.push((s.name.clone(), s.kind.code()));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Inlay hints: the routing target after the `module` declaration, and a
+/// `pre-state` marker on every `old(...)` expression.
+pub fn inlay_hints(text: &str, _uri: &str) -> Vec<InlayHint> {
+    let mut hints = Vec::new();
+
+    // Routing target at the `module` declaration line.
+    if let Ok(modules) = tpt_telos_parser::parse(text) {
+        if let Some(m) = modules.first() {
+            let target = tpt_telos_router::route(&m.attributes).target.as_str();
+            if let Some(line) = text.lines().position(|l| l.contains("module ")) {
+                let end = line_len(text, line);
+                hints.push(InlayHint {
+                    line,
+                    character: end,
+                    label: format!("→ {target}"),
+                    kind: 1,
+                });
+            }
+        }
+    }
+
+    // `old(...)` markers.
+    for tok in scan_tokens(text) {
+        if tok.text == "old" {
+            let next = scan_tokens(text)
+                .into_iter()
+                .find(|t| t.offset > tok.offset);
+            if next.as_ref().map(|t| t.text.as_str()) == Some("(") {
+                let (line, character) = tok_line_col(text, tok.offset);
+                hints.push(InlayHint {
+                    line,
+                    character: character + tok.len,
+                    label: "pre-state".to_string(),
+                    kind: 1,
+                });
+            }
+        }
+    }
+
+    hints
+}

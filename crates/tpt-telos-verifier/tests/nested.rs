@@ -103,3 +103,61 @@ fn cross_module_example_passes() {
         );
     }
 }
+
+#[test]
+fn real_time_example_passes() {
+    // examples/real_time.telos: @boundary(real_time, zero_allocation) controller
+    // (Rust backend) with a verified safe-range step.
+    let src = std::fs::read_to_string("../../examples/real_time.telos").unwrap();
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let r = verify(&problems[0]);
+    assert!(r.all_passed, "real_time.telos should verify, got {:?}", r);
+}
+
+#[test]
+fn crypto_example_passes() {
+    // examples/crypto.telos: @boundary(crypto) secret store whose invariant is
+    // preserved across consume/refresh.
+    let src = std::fs::read_to_string("../../examples/crypto.telos").unwrap();
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 2);
+    for p in &problems {
+        let r = verify(p);
+        assert!(
+            r.all_passed,
+            "{} should verify (crypto secret invariant), got {:?}",
+            p.func_name, r
+        );
+    }
+}
+
+#[test]
+fn cryptocurrency_example_passes() {
+    // examples/cryptocurrency.telos: conservation invariant
+    // (balance_a + balance_b == 1000000) preserved by a transfer.
+    let src = std::fs::read_to_string("../../examples/cryptocurrency.telos").unwrap();
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let r = verify(&problems[0]);
+    assert!(
+        r.all_passed,
+        "cryptocurrency.telos should verify (coin conservation), got {:?}",
+        r
+    );
+}
+
+#[test]
+fn distributed_example_passes() {
+    // examples/distributed.telos: @boundary(distributed) coordinator (Go
+    // backend) with a monotonically growing commit index.
+    let src = std::fs::read_to_string("../../examples/distributed.telos").unwrap();
+    let modules = parse(&src).unwrap();
+    let problems = extract(&modules).unwrap();
+    assert_eq!(problems.len(), 1);
+    let r = verify(&problems[0]);
+    assert!(r.all_passed, "distributed.telos should verify, got {:?}", r);
+}

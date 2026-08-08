@@ -133,10 +133,15 @@ fn problem_for(
         other => other.clone(),
     };
     let problems = extract(&[module.clone()])?;
-    Ok(problems
+    problems
         .into_iter()
         .find(|p| p.func_name == module.items[func_idx].func_name())
-        .expect("extracted problem for the transpiled function"))
+        .ok_or_else(|| {
+            format!(
+                "internal error: no verification problem extracted for function '{}'",
+                module.items[func_idx].func_name()
+            )
+        })
 }
 
 fn find_counterexample(
