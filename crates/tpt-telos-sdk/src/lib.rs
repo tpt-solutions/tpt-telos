@@ -13,13 +13,20 @@
 //! * [`compile_project`] / [`compile_project_tempdir`] — write a [`Project`] to
 //!   disk and shell `cargo build` / `go build`, reading back the compiled Rust
 //!   artifact bytes.
+//! * [`check_contradictions`] — a `.telos`-source-independent entry point over
+//!   just the solver core: find contradictions among named groups of
+//!   [`Constraint`]s, for callers (e.g. an alerting-rule engine) that have
+//!   their own domain rules but no `.telos` source to verify.
 //!
 //! Pipeline errors are surfaced as [`SdkError`]; verification *failure* is **not**
 //! an error — it is reported via [`VerifiedArtifact::all_verified`].
 
 pub mod build;
+pub mod contradiction;
 pub mod error;
 pub mod hint;
+pub mod json;
+pub mod prove;
 
 /// The fully-orchestrated result of compiling a `.telos` source: parsed
 /// modules, per-function transpilation outcomes, the assembled dual-backend
@@ -121,9 +128,17 @@ pub use tpt_telos_agent::llm_agent::LlmAgent;
 pub use tpt_telos_agent::{CodeAgent, FuncOutcome, StaticAgent};
 pub use tpt_telos_codegen::project::Project;
 pub use tpt_telos_codegen::proof::ProofManifest;
+pub use tpt_telos_ir::{Constraint, Linear, Relation};
 pub use tpt_telos_parser::ast::Module;
 pub use tpt_telos_router::Target;
-pub use tpt_telos_verifier::{CheckResult, Model, VerificationResult};
+pub use tpt_telos_verifier::{
+    entails, is_unsat, model, unsat_checked, CheckResult, Model, VerificationResult,
+};
 
 pub use crate::build::{compile_project, compile_project_tempdir, BuildOutput};
+pub use crate::contradiction::{
+    check_contradictions, Contradiction, ContradictionReport, NamedConstraints,
+};
 pub use crate::hint::{format_hint, format_outcome_hints};
+pub use crate::json::{parse_json, JsonError, JsonValue};
+pub use crate::prove::{build_report, parse_groups, ProveReport};

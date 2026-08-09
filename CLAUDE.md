@@ -105,9 +105,12 @@ Ten crates under `crates/` (currently version **0.2.0**, see `Cargo.toml` `[work
   drift-check commands.
 - **tpt-telos-sdk** — programmatic orchestration API for integration harnesses (e.g. `tpt-nexus`).
   Wraps the six crates above into one-call pipeline entry points (`compile`/`compile_static`),
-  a counterexample -> hint formatter (`format_hint`/`format_outcome_hints`), and a build step
-  (`compile_project`/`compile_project_tempdir`) that reads back compiled artifact bytes. See
-  `crates/tpt-telos-sdk/README.md`.
+   a counterexample -> hint formatter (`format_hint`/`format_outcome_hints`), a generic
+   `.telos`-source-independent [`check_contradictions`] entry point over just the solver core
+   (plus a hand-rolled JSON reader and the `telos-prove` standalone binary for callers who want
+   to contradiction-check named constraint groups without a library dependency), and a build step
+   (`compile_project`/`compile_project_tempdir`) that reads back compiled artifact bytes. See
+   `crates/tpt-telos-sdk/README.md`.
 
 ### Pipeline data flow
 

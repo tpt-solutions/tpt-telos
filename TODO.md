@@ -470,3 +470,75 @@ Phase 7 additions:
   workflow. (`playground/index.html`, `playground/main.js`, `playground/style.css`,
   `.github/workflows/playground.yml`)
 
+## Phase 12: "Verification Bridge" Investigation — Cross-Repo GPU/Argus Integration (2026-08-09)
+
+> A proposed extension asked for a verification pass ingesting tpt-gpu's TPTIR / tpt-crucible's
+> compute graph to prove (1) GPU arena sizing is sufficient for all input shapes, and (2)
+> tpt-argus's alerting rules for a deployment are contradiction-free. Investigated the three sibling
+> repos before building anything; the premise didn't hold, so the bespoke bridge was **not** built.
+> This mirrors the Phase 9 decision to stay self-contained rather than chase sibling-repo
+> integrations without concrete demand — recorded here so it isn't blindly re-proposed later.
+
+- **tpt-gpu**: TPTIR is real (`crates/tpt-gpu-ir-spec`) but is SSA `Operation`/`Block`/`Region`
+  form, not a graph. There is no "deterministic arena size" concept — the runtime `Arena` is a
+  simulated memory buffer, and the project deliberately *removed* `input_shapes()`/
+  `output_shape()` from its kernel trait because "shapes are dynamic." Proving arena sufficiency
+  needs a static-shape model tpt-gpu's own team removed on purpose.
+- **tpt-crucible**: has its own graph IR (`ComputationalGraph{nodes, edges}` in
+  `crates/tpt-catalyst/src/ir.rs`), but it's Crucible's "TPT-IR", not tpt-gpu's TPTIR. Crucible's
+  own TODO records it's blocked waiting on tpt-gpu to publish a shared IR spec — that unification
+  doesn't exist between those two repos yet, let alone a third consumer.
+- **tpt-argus**: already solves rule-contradiction checking in-house (`argus-logic`'s
+  `analyze_contradictions`, interval-overlap over a `Condition` AST). An earlier draft of its own
+  spec proposed depending on tpt-telos for this; the actual dev notes record that being **rejected**
+  in favor of a self-contained implementation.
+- [x] **What was built instead**: `tpt_telos_sdk::check_contradictions` — a `.telos`-source-
+  independent entry point exposing just the solver core (`tpt_telos_ir::Constraint` +
+  `tpt_telos_verifier::unsat_checked`) so any tool in the workspace can translate its own domain
+  rules into `Constraint`s and get pairwise contradiction-checking, without tpt-telos needing to
+  ingest a format (TPTIR/compute-graph) that isn't stable yet. (`crates/tpt-telos-sdk/src/contradiction.rs`,
+  `crates/tpt-telos-sdk/README.md`)
+
+## Phase 13: `telos-prove` CLI — Constraint-Group Contradiction Checking (2026-08-09)
+
+> A thin CLI over the existing `tpt_telos_sdk::check_contradictions`/`unsat_checked`/`model` solver
+> core, for callers with no `.telos` source who want a standalone binary rather than a library
+> dependency. Deliberately minimal: no new `ConstraintSolver` trait, no new `Constraint` enum
+> variants, no new `SatResult` type — pure I/O plumbing over what already exists, per the Phase 12
+> "stay self-contained" decision.
+
+- [x] Fix the pre-existing broken `check_contradictions` doctest (and its README copy) — was asserting
+  `value > 200` combined with `value >= 200` is a contradiction (it isn't; `value = 300` satisfies
+  both). Replaced with a genuine `<= 200` vs `>= 500` contradiction, plus a positive doctest proving
+  `> 200` + `>= 200` is consistent. (`crates/tpt-telos-sdk/src/contradiction.rs`, `crates/tpt-telos-sdk/README.md`)
+- [x] Hand-rolled JSON reader, no serde — `Json`/`JsonValue` + recursive-descent parser, errors carry
+  a byte offset converted to line/col via `tpt_telos_parser::span::LineIndex`.
+  (`crates/tpt-telos-sdk/src/json.rs`)
+- [x] Constraint-group schema + report — `parse_groups`/`build_report`/`format_human`/`format_json`
+  wrapping `check_contradictions`/`unsat_checked`/`model`; per-group self-unsat detection plus
+  independent `overall_unsat` checking for jointly-unsat-but-no-pairwise-conflict inputs.
+  (`crates/tpt-telos-sdk/src/prove.rs`)
+- [x] Wire `json`/`prove` modules + re-exports into the crate root. (`crates/tpt-telos-sdk/src/lib.rs`)
+- [x] New `telos-prove` binary — auto-discovered from `src/bin/telos-prove.rs`, no new
+  `Cargo.toml` dependencies. `--json`/`--strict` flags, reads a file arg or stdin.
+  (`crates/tpt-telos-sdk/src/bin/telos-prove.rs`)
+- [x] Fixtures + tests — `tests/fixtures/*.json`, unit tests in `json.rs`/`prove.rs`, and
+  `tests/telos_prove.rs` driving the built binary via `std::process::Command` (mirrors
+  `crates/tpt-telos-cli/tests/cli.rs`'s pattern; no `assert_cmd` dependency added).
+  (`crates/tpt-telos-sdk/tests/`)
+- [x] Docs — `crates/tpt-telos-sdk/README.md` `telos-prove` section; `CLAUDE.md` workspace-layout
+  bullet mentions `check_contradictions` + `telos-prove`.
+
+> Phase 13 implemented: `telos-prove` is a thin, dependency-free CLI over the existing
+> `tpt_telos_sdk::check_contradictions`/`unsat_checked`/`model` solver core, for callers with no
+> `.telos` source who want a standalone binary instead of a library dependency. It adds a hand-rolled
+> JSON reader (`json.rs`, no serde), a constraint-group schema + report (`prove.rs`:
+> `parse_groups`/`build_report`/`format_human`/`format_json`), and the `telos-prove` binary
+> (file-or-stdin input, `--json`/`--strict` flags). The report surfaces per-group self-unsat
+> detection and pairwise/joint contradictions via `overall_unsat`. No new `ConstraintSolver` trait,
+> `Constraint` variants, or `SatResult` type were introduced — pure I/O plumbing per the Phase 12
+> "stay self-contained" decision. Verified end-to-end: the fixed doctest now correctly flags
+> `value <= 200` vs `value >= 500` as a contradiction (and proves `value > 200` + `value >= 200` is
+> consistent), and `tests/telos_prove.rs` drives the binary across contradiction/consistent/self-unsat/
+> json/strict/stdin/malformed paths.
+
