@@ -107,6 +107,33 @@ jobs:
       - name: Build (MSRV)
         run: cargo build --workspace
 
+  uir-bridge:
+    name: TPT-UIR prover bridge (cross-repo)
+    # The prover bridge consumes the sibling `tpt-uir` workspace via a relative
+    # path dep. It is built/tested here only when that repo is available; the
+    # job is non-fatal so the main pipeline does not depend on the sibling repo
+    # being present or public in CI.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out sibling tpt-uir workspace
+        run: git clone --depth 1 https://github.com/tpt-solutions/tpt-uir.git ../../../tpt-uir
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: uir
+      - name: Format
+        run: cargo fmt -p tpt-telos-uir-bridge -- --check
+      - name: Clippy
+        run: cargo clippy -p tpt-telos-uir-bridge --all-targets --features uir -- -D warnings
+      - name: Test (FM engine)
+        run: cargo test -p tpt-telos-uir-bridge --features uir
+      - name: Test (Z3 engine, if available)
+        run: cargo test -p tpt-telos-uir-bridge --features uir,z3
+
   doc-consistency:
     name: Documentation consistency
     runs-on: ubuntu-latest

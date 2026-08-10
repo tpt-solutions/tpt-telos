@@ -108,6 +108,7 @@ At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
 | `tpt-telos-codegen` | Rust/Go/Python backends, FFI bridge, eject, project assembly, cryptographic proof manifest. |
 | `tpt-telos-lsp`     | JSON-RPC 2.0 language server over stdio (diagnostics, hover, quick-fix code actions, `telos/verify`, `telos/eject`). |
 | `tpt-telos-sdk`   | Programmatic orchestration API: one-call `compile`/`compile_static` pipeline, counterexample → hint formatter, and `compile_project` build step for integrators. |
+| `tpt-telos-uir-bridge` | The **Prover Bridge** for `tpt-uir` (Phase 4): consumes a TPT-UIR `Region` and formally proves each `tpt_memory` scope's allocations stay within the target hardware's physical-memory budget (FM engine, optional Z3 for nonlinear sizes). |
 | `out-telos-wasm`   | WASM bindings over `parser` + `verifier` for the zero-install browser playground. |
 
 ## Architecture note: divergence from spec.txt
@@ -116,10 +117,10 @@ At runtime it needs `TELAS_LLM_KEY` and `TELAS_LLM_PROVIDER`
 `verifier/`, and `ai-orchestrator/` sibling directories, and assumed Z3/CVC5 as the
 primary solver, a LangGraph-style orchestration layer, and vLLM for local inference.
 
-What was built instead is a flat **Cargo workspace** under `crates/` with ten
+What was built instead is a flat **Cargo workspace** under `crates/` with eleven
 focused members (parser, ir, verifier, router, agent, codegen, lsp, cli, the
-`out-telos-wasm` browser-playground bindings, and the `tpt-telos-sdk` orchestration
-API). The reasons:
+`out-telos-wasm` browser-playground bindings, the `tpt-telos-sdk` orchestration
+API, and the `tpt-telos-uir-bridge` prover bridge for `tpt-uir`). The reasons:
 
 - A single workspace makes cross-crate refactoring, CI, and coverage tooling
   straightforward with standard Cargo tooling and no per-directory build wiring.
@@ -198,3 +199,52 @@ Verification *failure* is **not** an error — it is reported via
 `VerifiedArtifact::all_verified`. `SdkError` is only for pipeline failures (parse,
 transpile, codegen). See `crates/tpt-telos-sdk/examples/sdk_usage.rs` for a runnable
 example (`cargo run -p tpt-telos-sdk --example sdk_usage`).
+
+## TPT-UIR Prover Bridge
+
+`tpt-telos-uir-bridge` (Phase 4 of [`tpt-uir`](https://github.com/tpt-solutions/tpt-uir))
+formally proves that a model's memory allocations fit the target hardware. The flow:
+
+1. An ingestion adapter in `tpt-gpu` / `tpt-crucible` lowers its model to a TPT-UIR
+   `Region` and writes it to a `.tptuir` file (postcard). The `tpt-uir-dialects`
+   liveness pass has already wrapped each alloc-bearing operation with
+   `tpt_memory.scope_begin` / `tpt_memory.alloc` / `tpt_memory.scope_end`, so every
+   allocation carries a `scope` and (via a `tensor`/`type` attribute, or a block
+   argument) a `TensorType` describing its size.
+2. The bridge walks the region and extracts each `mem.alloc`'s byte size as a
+   symbolic expression over the region's `Dimension::Symbolic` variables, then
+   proves per scope that `sum(alloc sizes) <= budget` for **all** dimension
+   assignments. The negation (`sum > budget`) being *unsatisfiable* means the scope
+   is safe; if it is *satisfiable*, the solver returns a concrete witness
+   (`ProofResult::Counterexample`) showing the offending dimension values.
+
+```rust
+use tpt_telos_uir_bridge::{prove_tptuir_file, MemoryLimits, ProofResult};
+
+// Prove that every scope in `model.tptuir` fits a 1 MiB budget, with the
+// "weights" scope capped at 256 KiB.
+let limits = MemoryLimits::with_default(1024 * 1024).with_scope("weights", 256 * 1024);
+match prove_tptuir_file("model.tptuir", &limits).unwrap() {
+    ProofResult::Valid => println!("memory budget proven safe"),
+    ProofResult::Counterexample { scope, model, .. } => {
+        println!("scope {scope} overflows; witness: {model:?}")
+    }
+    ProofResult::Inconclusive { reason } => println!("needs Z3: {reason}"),
+}
+```
+
+The standalone CLI mirrors this:
+
+```sh
+# Default 1 MiB budget; "weights" scope capped at 256 KiB.
+telos-uir-prove model.tptuir --default-limit 1048576 --scope weights 262144
+# exit 0 = valid, 1 = counterexample (over budget), 2 = inconclusive / error
+```
+
+The default engine is tpt-telos' built-in Fourier-Motzkin SMT core (sound over
+integers, no external dependency) and handles linear allocation sizes (fixed
+dims, or a single symbolic dim per tensor). Build with `--features uir,z3` to route
+nonlinear sizes (e.g. a tensor with two symbolic dimensions) through the Z3 solver
+for exact integer arithmetic. The crate is gated behind the `uir` feature so the
+default `cargo test --workspace` needs no sibling `tpt-uir` checkout; build and test
+it with `cargo test -p tpt-telos-uir-bridge --features uir`.

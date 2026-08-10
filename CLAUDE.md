@@ -55,7 +55,7 @@ with an enforced 75% line-coverage floor.
 
 ## Workspace layout
 
-Ten crates under `crates/` (currently version **0.2.0**, see `Cargo.toml` `[workspace.package]`), each with a focused responsibility in the pipeline:
+Eleven crates under `crates/` (currently version **0.2.0**, see `Cargo.toml` `[workspace.package]`), each with a focused responsibility in the pipeline:
 
 - **tpt-telos-parser** — hand-written lexer/parser/AST for `.telos` source. Grammar is the source of truth
   at `crates/tpt-telos-parser/src/grammar.ebnf`; keep it in sync with `lexer.rs`/`parser.rs`/`ast.rs` when
@@ -109,8 +109,16 @@ Ten crates under `crates/` (currently version **0.2.0**, see `Cargo.toml` `[work
    `.telos`-source-independent [`check_contradictions`] entry point over just the solver core
    (plus a hand-rolled JSON reader and the `telos-prove` standalone binary for callers who want
    to contradiction-check named constraint groups without a library dependency), and a build step
-   (`compile_project`/`compile_project_tempdir`) that reads back compiled artifact bytes. See
-   `crates/tpt-telos-sdk/README.md`.
+    (`compile_project`/`compile_project_tempdir`) that reads back compiled artifact bytes. See
+    `crates/tpt-telos-sdk/README.md`.
+- **tpt-telos-uir-bridge** — the **Prover Bridge** for `tpt-uir` (Phase 4 of that repo). Consumes a
+  TPT-UIR `Region` (serialized `.tptuir`) and formally proves each `tpt_memory` scope's
+  `mem.alloc` totals stay within a per-scope physical-memory budget for all symbolic-dimension
+  assignments. Extraction (`extract_allocs` / `extract_symbolic_dims`) plus the proof
+  (`prove_memory_bounds` → `ProofResult::Valid` / `Counterexample(model)` / `Inconclusive`) reuse
+  tpt-telos' Fourier-Motzkin SMT core; the `z3` feature routes nonlinear allocation sizes (products
+  of symbolic dimensions) through the Z3 solver. Gated behind the `uir` feature so the default build
+  needs no sibling `tpt-uir` checkout; `src/bin/telos-uir-prove.rs` is the standalone CLI.
 
 ### Pipeline data flow
 
