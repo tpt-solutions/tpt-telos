@@ -8,7 +8,9 @@ Part of the [tpt-telos](https://github.com/tpt-solutions/tpt-telos) compiler wor
 
 `tpt-telos-lsp` is a standard LSP server that provides real-time feedback for `.telos` files. It
 speaks JSON-RPC 2.0 over stdio with `Content-Length` framing (compatible with VS Code, Neovim,
-Helix, and any other LSP-capable editor).
+Helix, and any other LSP-capable editor). A ready-made VS Code extension lives in
+[`vscode-telos/`](../../vscode-telos/README.md); for other editors see
+[`docs/editors.md`](../../docs/editors.md).
 
 On every document change it runs the full pipeline — parse → IR → verify → route → agent → codegen
 — and surfaces the results as:
@@ -58,6 +60,10 @@ let responses = server.handle(&serde_json::json!({
 | `textDocument/didOpen`, `didChange`, `didSave`, `didClose` | Document sync |
 | `textDocument/hover` | Hover info |
 | `textDocument/codeAction` | Quick-fix `requires` suggestions from failing checks' counterexamples |
+| `textDocument/formatting` | Canonical reformatting (also exposed standalone as `telos fmt`) |
+| `textDocument/definition` / `references` | Go-to-definition / find-references, indexed over currently open documents |
+| `textDocument/completion` | Symbol completion, indexed over currently open documents |
+| `textDocument/inlayHint` | Inferred type/routing hints |
 | `telos/verify` | Full verification summary (custom) |
 | `telos/eject` | Ejected code preview (custom) |
 

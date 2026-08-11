@@ -326,9 +326,17 @@ Phase 7 additions:
 ### Editor integration (highest-leverage adoption gap)
 - [x] Build a minimal VS Code extension: syntax highlighting (TextMate grammar) + LSP client wiring
   (`vscode-languageclient`) against the existing `telos lsp` server. (`vscode-telos/`)
-- [x] Extend the LSP server: `textDocument/formatting` (reuse the existing pretty-printer).
-  (`crates/tpt-telos-lsp/src/lib.rs`) `textDocument/definition`/`references` and `textDocument/completion`
-  remain open (need a workspace-wide symbol index).
+- [x] Extend the LSP server: `textDocument/formatting` (reuse the existing pretty-printer),
+  `textDocument/definition`/`references`, `textDocument/completion`, and `textDocument/inlayHint`
+  are all implemented (`crates/tpt-telos-lsp/src/lib.rs`, `crates/tpt-telos-lsp/src/analysis.rs`).
+  Note: the symbol index (`build_index`) is built from the LSP session's currently-open documents,
+  not a full workspace directory scan — definition/references only find symbols in files the editor
+  has opened, not the whole project.
+- [x] Document non-VS-Code editor setup (Neovim `nvim-lspconfig` / Helix `languages.toml` snippets
+  against the same `telos lsp` binary). (`docs/editors.md`)
+- [x] Expose the LSP's formatter as a standalone `telos fmt [--check|--stdout]` CLI command, and add
+  `telos doctor` to check for the optional `go`/`gofmt`/`z3` tools some commands shell out to.
+  (`crates/tpt-telos-cli/src/main.rs`)
 
 ### Release & contribution infra
 - [x] Add ARM64/musl targets to the release build matrix

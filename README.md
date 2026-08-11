@@ -144,6 +144,15 @@ not a substitute. The source-of-truth for the grammar is
 `crates/tpt-telos-parser/src/grammar.ebnf`; for the full feature and phase history see
 [`TODO.md`](TODO.md); for example `.telos` files see [`examples/README.md`](examples/README.md).
 
+## Editor integration
+
+A VS Code extension (syntax highlighting + LSP client) lives in
+[`vscode-telos/`](vscode-telos/README.md). For Neovim or Helix, see
+[`docs/editors.md`](docs/editors.md) for `nvim-lspconfig` / `languages.toml` setup against
+the same `telos lsp` server — see [`tpt-telos-lsp`](crates/tpt-telos-lsp/README.md) for what
+the server itself provides (diagnostics, hover, definition/references, completion,
+formatting, quick-fixes).
+
 ## Troubleshooting
 
 **`gofmt: command not found` / `go: command not found`**
@@ -151,7 +160,9 @@ not a substitute. The source-of-truth for the grammar is
 compile and canonicalize generated Go. If Go is not on your `PATH`, these commands
 fall back to a warning rather than a hard failure; the generated source is still
 written to disk. Install Go ≥ 1.21 and ensure `$GOPATH/bin` (or the Go install
-`bin/`) is on your `PATH`.
+`bin/`) is on your `PATH`. Run `telos doctor` to check which optional tools
+(`go`, `gofmt`, `z3`) are currently available on `PATH` before running a command
+that needs them.
 
 **`--features z3` fails to build**
 The `z3` Cargo feature links against the Z3 C library via `z3-sys`, which requires
@@ -165,6 +176,15 @@ Coverage reporting requires `cargo-llvm-cov`. Install it with:
 ```sh
 cargo install cargo-llvm-cov
 ```
+
+## Documentation
+
+- **[Language Guide](docs/LANGUAGE.md)** — syntax, types, contracts, and every supported feature.
+- **[Getting Started Tutorial](docs/TUTORIAL.md)** — from install to a verified, compiling artifact.
+- **[CLI Reference](docs/CLI.md)** — every `telos` subcommand, flag, and exit code.
+- **[SDK Integration Guide](docs/SDK.md)** — embed tpt-telos in your own Rust tooling via `tpt-telos-sdk`.
+
+For example `.telos` files, see [`examples/README.md`](examples/README.md).
 
 ## License
 

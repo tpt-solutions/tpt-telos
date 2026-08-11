@@ -180,6 +180,23 @@ enum Command {
         /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
         shell: Shell,
     },
+    /// Reformat a .telos file canonically (reuses the LSP's formatter).
+    Fmt {
+        /// Path to the .telos source file.
+        file: String,
+        /// Check formatting without writing; exit non-zero if changes are needed.
+        #[arg(long)]
+        check: bool,
+        /// Print the formatted output to stdout instead of writing it back.
+        #[arg(long)]
+        stdout: bool,
+    },
+    /// Check for optional external tools (go, gofmt, Z3) needed by some commands.
+    Doctor {
+        /// Emit machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the tpt-telos language server (LSP over stdio) for IDE integration.
     Lsp,
 }
@@ -309,6 +326,27 @@ fn main() -> ExitCode {
             clap_complete::generate(shell, &mut Cli::command(), "telos", &mut std::io::stdout());
             ExitCode::SUCCESS
         }
+        Command::Fmt {
+            file,
+            check,
+            stdout,
+        } => match run_fmt(&file, check, stdout) {
+            Ok(ok) => {
+                if ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                }
+            }
+            Err(e) => {
+                eprintln!("fmt error: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Doctor { json } => {
+            run_doctor(json);
+            ExitCode::SUCCESS
+        }
         Command::Lsp => match tpt_telos_lsp::run_stdio() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -322,6 +360,122 @@ fn main() -> ExitCode {
 fn load_modules(file: &str) -> Result<Vec<Module>, String> {
     let src = fs::read_to_string(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
     parse(&src)
+}
+
+/// Reformat `file` canonically, reusing the same `format_source` the LSP's
+/// `textDocument/formatting` handler calls. Returns `true` when the file is
+/// (or was already) in canonical form, `false` when `--check` found changes
+/// needed — the caller maps that to the process exit code.
+fn run_fmt(file: &str, check: bool, stdout: bool) -> Result<bool, String> {
+    let src = fs::read_to_string(file).map_err(|e| format!("cannot read `{file}`: {e}"))?;
+    let formatted = tpt_telos_lsp::analysis::format_source(&src)?;
+    let unchanged = formatted == src;
+
+    if stdout {
+        print!("{formatted}");
+        return Ok(true);
+    }
+
+    if check {
+        if unchanged {
+            println!("{file}: already formatted");
+        } else {
+            println!("{file}: would reformat");
+        }
+        return Ok(unchanged);
+    }
+
+    if unchanged {
+        println!("{file}: already formatted");
+    } else {
+        fs::write(file, &formatted).map_err(|e| format!("cannot write `{file}`: {e}"))?;
+        println!("Reformatted {file}");
+    }
+    Ok(true)
+}
+
+#[derive(Serialize)]
+struct DoctorCheck {
+    tool: String,
+    found: bool,
+    version: Option<String>,
+    needed_for: String,
+}
+
+/// Probe `cmd --version-flag` and report whether it ran successfully, along
+/// with the first line of its output as a version string.
+fn probe_tool(cmd: &str, version_flag: &str) -> (bool, Option<String>) {
+    match std::process::Command::new(cmd).arg(version_flag).output() {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let first_line = text
+                .lines()
+                .next()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.trim().to_string());
+            (true, first_line)
+        }
+        _ => (false, None),
+    }
+}
+
+#[cfg(feature = "z3")]
+fn z3_doctor_check() -> DoctorCheck {
+    DoctorCheck {
+        tool: "z3".to_string(),
+        found: tpt_telos_verifier::z3_solver::is_z3_available(),
+        version: None,
+        needed_for: "`telos verify --solver z3` (exact nonlinear arithmetic)".to_string(),
+    }
+}
+
+#[cfg(not(feature = "z3"))]
+fn z3_doctor_check() -> DoctorCheck {
+    DoctorCheck {
+        tool: "z3".to_string(),
+        found: false,
+        version: Some("not applicable: build with `--features z3` to enable".to_string()),
+        needed_for: "`telos verify --solver z3` (exact nonlinear arithmetic)".to_string(),
+    }
+}
+
+/// Check for the optional external tools some commands shell out to
+/// (`project --check`, `eject`'s Go backend, `--solver z3`) and report
+/// what's available, so missing tools are diagnosed upfront instead of
+/// surfacing as a confusing failure deep into a build.
+fn run_doctor(json: bool) {
+    let mut checks = Vec::new();
+
+    let (go_found, go_version) = probe_tool("go", "version");
+    checks.push(DoctorCheck {
+        tool: "go".to_string(),
+        found: go_found,
+        version: go_version,
+        needed_for: "`telos project --check` / `telos eject` (Go backend)".to_string(),
+    });
+
+    let (gofmt_found, gofmt_version) = probe_tool("gofmt", "-h");
+    checks.push(DoctorCheck {
+        tool: "gofmt".to_string(),
+        found: gofmt_found,
+        version: gofmt_version,
+        needed_for: "canonicalizing generated Go (`project`/`eject`)".to_string(),
+    });
+
+    checks.push(z3_doctor_check());
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&checks).unwrap());
+        return;
+    }
+
+    println!("telos doctor: optional external tool check\n");
+    for c in &checks {
+        let status = if c.found { "found" } else { "missing" };
+        let detail = c.version.as_deref().unwrap_or("");
+        println!("  [{status:>7}] {:<8} {}", c.tool, detail);
+        println!("            needed for: {}", c.needed_for);
+    }
 }
 
 // ---------------------------------------------------------------------------

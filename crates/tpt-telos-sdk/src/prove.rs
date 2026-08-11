@@ -394,7 +394,10 @@ mod tests {
         let groups = vec![NamedConstraints {
             label: "a".to_string(),
             constraints: vec![
-                Constraint(Linear::var("x").sub(&Linear::constant_only(1)), Relation::Ge),
+                Constraint(
+                    Linear::var("x").sub(&Linear::constant_only(1)),
+                    Relation::Ge,
+                ),
                 Constraint(Linear::var("x"), Relation::Le),
             ],
         }];

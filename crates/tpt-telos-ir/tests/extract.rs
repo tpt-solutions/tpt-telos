@@ -121,8 +121,8 @@ fn wallet_example_ensures_locations_match_fixture_lines() {
         .filter(|c| c.is_ensures)
         .map(|c| c.location.line)
         .collect();
-    // The two `ensures` clauses sit on lines 11 and 12 of wallet.telos.
-    assert_eq!(ensures_lines, vec![11, 12]);
+    // The two `ensures` clauses sit on lines 19 and 20 of wallet.telos.
+    assert_eq!(ensures_lines, vec![19, 20]);
 }
 
 #[test]

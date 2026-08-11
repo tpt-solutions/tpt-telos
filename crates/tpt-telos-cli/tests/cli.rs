@@ -398,3 +398,92 @@ fn verify_manifest_passes_for_intact_build() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn fmt_stdout_is_idempotent() {
+    // Formatting an already-formatted file should be a no-op: fmt(fmt(x)) == fmt(x).
+    let (ok, once, stderr) = run(&["fmt", WALLET, "--stdout"]);
+    assert!(ok, "fmt --stdout should exit 0:\n{stderr}");
+    assert!(!once.is_empty(), "formatted output should not be empty");
+
+    let path = write_temp(
+        &format!("telos_fmt_once_{}.telos", std::process::id()),
+        &once,
+    );
+    let (ok, twice, stderr) = run(&["fmt", path.to_str().unwrap(), "--stdout"]);
+    assert!(ok, "fmt --stdout (pass 2) should exit 0:\n{stderr}");
+    assert_eq!(once, twice, "formatting should be idempotent");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn fmt_check_reports_changes_needed_then_passes_after_writing() {
+    let (_, stdout, stderr) = run(&["fmt", WALLET, "--stdout"]);
+    assert!(
+        stderr.is_empty(),
+        "fmt --stdout should not error:\n{stderr}"
+    );
+    let path = write_temp(
+        &format!("telos_fmt_check_{}.telos", std::process::id()),
+        &stdout,
+    );
+
+    // Already-canonical file: --check should pass (exit 0) and not modify it.
+    let (ok, _, stderr) = run(&["fmt", path.to_str().unwrap(), "--check"]);
+    assert!(
+        ok,
+        "fmt --check on canonical input should exit 0:\n{stderr}"
+    );
+
+    // Reformat in place, then re-run --check: still exit 0.
+    let (ok, _, stderr) = run(&["fmt", path.to_str().unwrap()]);
+    assert!(ok, "fmt (write) should exit 0:\n{stderr}");
+    let (ok, _, stderr) = run(&["fmt", path.to_str().unwrap(), "--check"]);
+    assert!(ok, "fmt --check after formatting should exit 0:\n{stderr}");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn fmt_check_fails_on_malformed_file() {
+    let path = write_temp(
+        &format!("telos_fmt_malformed_{}.telos", std::process::id()),
+        "this is not valid telos source {{{",
+    );
+    let (ok, _, stderr) = run(&["fmt", path.to_str().unwrap(), "--check"]);
+    assert!(!ok, "fmt --check on malformed input should exit non-zero");
+    assert!(!stderr.is_empty(), "expected a parse error message");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn doctor_runs_and_reports_json() {
+    let (ok, stdout, stderr) = run(&["doctor", "--json"]);
+    assert!(ok, "doctor --json should exit 0:\n{stderr}");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
+    let checks = v.as_array().expect("doctor --json should output an array");
+    let tools: Vec<&str> = checks.iter().map(|c| c["tool"].as_str().unwrap()).collect();
+    assert!(tools.contains(&"go"));
+    assert!(tools.contains(&"gofmt"));
+    assert!(tools.contains(&"z3"));
+    for c in checks {
+        assert!(c["found"].is_boolean(), "found should be a bool: {c}");
+    }
+}
+
+#[test]
+fn doctor_runs_human_readable() {
+    let (ok, stdout, stderr) = run(&["doctor"]);
+    assert!(ok, "doctor should exit 0:\n{stderr}");
+    assert!(
+        stdout.contains("go"),
+        "expected `go` in doctor output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("gofmt"),
+        "expected `gofmt` in doctor output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("z3"),
+        "expected `z3` in doctor output:\n{stdout}"
+    );
+}

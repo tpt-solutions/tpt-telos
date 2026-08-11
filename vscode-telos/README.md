@@ -2,6 +2,8 @@
 
 Language support for [tpt-telos](https://github.com/tpt-solutions/tpt-telos) `.telos` source files.
 
+For Neovim or Helix instead of VS Code, see [`docs/editors.md`](../docs/editors.md).
+
 ## Features
 
 - Syntax highlighting for `.telos` files (keywords, attributes, operators, types)

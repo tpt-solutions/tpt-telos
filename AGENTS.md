@@ -33,6 +33,12 @@ The CLI needs no network by default: the offline `StaticAgent` runs unless `--ll
 - `tpt-telos-sdk` — programmatic orchestration API (`compile`/`compile_static`, `format_outcome_hints`, `compile_project`) for integrators.
 - `out-telos-wasm` — WASM bindings over `parser` + `verifier` for the browser playground (`publish = false`).
 
+## Changelogs
+Every crate has its own `CHANGELOG.md` in its crate directory (Keep a Changelog / SemVer format). Entries must match what is **actually published on crates.io**:
+- Published crates (`tpt-telos`, `-agent`, `-codegen`, `-ir`, `-lsp`, `-parser`, `-router`, `-verifier`) document each released version with its real crates.io publish date (`0.1.0` = 2026-07-16, `0.1.1` = 2026-08-01). The local workspace is at `0.2.0` (not yet published) and lives under `## [Unreleased]`.
+- Unpublished crates (`tpt-telos-sdk`, `tpt-telos-uir-bridge`, `out-telos-wasm`) have only an `## [Unreleased]` section.
+- After `cargo publish`, promote the `Unreleased` `0.2.0` entry to a dated `[0.2.0]` section.
+
 ## Routing & attributes
 - `@boundary(...)` on a module picks the backend: `cpu_bound` / `zero_allocation` / `crypto` / `real_time` → Rust; `network_io` / `high_concurrency` / `distributed` / `high_latency` → Go. Any Go flag wins; unannotated defaults to **Rust**.
 - `@eject` marks a function as a trusted opaque block (`f_impl`/`fImpl`) wrapped by a generated `requires`/`ensures` contract guard.

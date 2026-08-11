@@ -55,8 +55,8 @@ module M {
 #[test]
 fn hover_reports_contract_and_status() {
     let text = read("../../examples/wallet.telos");
-    // Hover over `transfer` on its definition line (line index 8 in the file).
-    let md = analysis::hover_markdown(&text, 8, 9).expect("hover over transfer");
+    // Hover over `transfer` on its definition line (line index 16 in the file).
+    let md = analysis::hover_markdown(&text, 16, 9).expect("hover over transfer");
     assert!(md.contains("func `transfer`"));
     assert!(md.contains("VERIFIED"));
     assert!(md.contains("requires"));
