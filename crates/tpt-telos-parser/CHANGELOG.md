@@ -7,7 +7,19 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-- Development toward the 0.2.0 workspace release.
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- Source spans (`span.rs`): line/col tracking threaded through the lexer and
+  parser, powering caret/underline diagnostics in the CLI and LSP.
+- Expanded lexer/parser/span integration test suites.
+
+### Fixed
+
+- Synced `grammar.ebnf`'s version comment and its `@state(persistent|ephemeral)`
+  note (previously said "parsed only"; storage class is implemented in the
+  router/codegen).
 
 ## [0.1.1] - 2026-08-01
 

@@ -7,7 +7,18 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-- Development toward the 0.2.0 workspace release.
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- `StaticAgent` now synthesizes a first-attempt body for pure inequality
+  `ensures` clauses (e.g. `ensures balance >= 0`), instead of producing an
+  empty body.
+
+### Fixed
+
+- `problem_for` returns `Result` instead of panicking on an internal
+  re-extraction failure during the verify/rewrite loop.
 
 ## [0.1.1] - 2026-08-01
 

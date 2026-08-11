@@ -7,7 +7,17 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-- Development toward the 0.2.0 workspace release.
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- `RoutingDiagnostic` now also flags `real_time`/`zero_allocation` modules
+  routed to Python (interpreter + GC), previously only checked for Go-target
+  conflicts.
+- `route_checked` warns on unrecognized `@state(...)` values (e.g. a typo like
+  `@state(persistant)`) instead of silently falling back to `Ephemeral`.
+- `route_checked` emits `UnrecognizedBoundaryFlag` for unknown `@boundary(...)`
+  flags (e.g. `cp_bound`) instead of silently ignoring them.
 
 ## [0.1.1] - 2026-08-01
 
