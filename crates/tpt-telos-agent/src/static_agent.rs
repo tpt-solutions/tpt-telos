@@ -163,9 +163,15 @@ fn eval_post(e: &Expr, ce: &Model) -> i64 {
                 _ => 0,
             }
         }
-        // New expression kinds are not evaluable in the counterexample model;
-        // fall back to 0.
-        _ => 0,
+        _ => {
+            // If a new Expr variant is added and not handled here, the CE model
+            // will silently evaluate it to 0, producing a misleading counterexample.
+            debug_assert!(
+                false,
+                "eval_post: unhandled Expr variant in counterexample evaluation: {e:?}"
+            );
+            0
+        }
     }
 }
 
@@ -196,7 +202,13 @@ fn eval_pre(e: &Expr, ce: &Model) -> i64 {
                 _ => 0,
             }
         }
-        _ => 0,
+        _ => {
+            debug_assert!(
+                false,
+                "eval_pre: unhandled Expr variant in counterexample evaluation: {e:?}"
+            );
+            0
+        }
     }
 }
 
@@ -219,6 +231,17 @@ fn apply_fixes(stmts: &mut [Stmt], fixes: &HashMap<(String, String), Expr>) {
                         a.value = value.clone();
                         a.op = AssignOp::Set;
                     }
+                }
+            }
+            Stmt::If(if_stmt) => {
+                apply_fixes(&mut if_stmt.then_body, fixes);
+                if let Some(else_body) = &mut if_stmt.else_body {
+                    apply_fixes(else_body, fixes);
+                }
+            }
+            Stmt::Match(match_stmt) => {
+                for arm in &mut match_stmt.arms {
+                    apply_fixes(&mut arm.body, fixes);
                 }
             }
             _ => {}

@@ -550,3 +550,114 @@ Phase 7 additions:
 > consistent), and `tests/telos_prove.rs` drives the binary across contradiction/consistent/self-unsat/
 > json/strict/stdin/malformed paths.
 
+
+## Phase 14: Correctness Fixes — Tier 1 Bugs (2026-08-20)
+
+> Four correctness issues surfaced in a systematic codebase review: a thread-safety UB in
+> the global solver backend, a CE-rewriter that can't fix bugs inside conditional branches,
+> a silent 0-fallback in CE evaluation that hides missing Expr handling, and the aggregate
+> lowering is dead code. Addressed in priority order before adding new features.
+
+- [x] **`static mut SOLVER_BACKEND` replaced with `OnceLock<SolverBackend>`** — eliminates UB
+  under the multi-threaded gRPC cluster. `set_solver_backend` becomes `OnceLock::set(...).ok()`
+  (idempotent; no-op if already set); `solver_backend()` uses `OnceLock::get().copied().unwrap_or_default()`.
+  (`crates/tpt-telos-verifier/src/lib.rs`)
+- [x] **`apply_fixes` now recurses into `if`/`match` arms** — previously the CE-guided rewriter
+  only patched top-level `MutateState`/`Assign` statements; verification failures inside
+  conditional branches were never repaired. Added recursive descent for `Stmt::If` (then+else)
+  and `Stmt::Match` (all arms). (`crates/tpt-telos-agent/src/static_agent.rs`)
+- [x] **`eval_post`/`eval_pre` catch-all replaced with `debug_assert!`** — the silent `_ => 0`
+  fallback for unhandled `Expr` variants in CE evaluation now fires a `debug_assert!(false, ...)`
+  in debug builds, ensuring new AST expression kinds are caught at test time rather than
+  producing misleading CE witnesses. (`crates/tpt-telos-agent/src/static_agent.rs`)
+- [ ] **Aggregate expression lowering audit** — `sum(...)` in contracts computes a `Linear`
+  sum successfully but then returns `Err(...)` before emitting a constraint. Needs either
+  proper integration via `linearize` at the comparison level, or an explicit
+  "unsupported" error surfaced at constraint-extraction time (not a silent Err at the inner loop).
+  (`crates/tpt-telos-ir/src/extract.rs` around line 618)
+
+> Phase 14 (partial): OnceLock fix, apply_fixes recursion, and eval debug_assert are implemented
+> and tested. Aggregate lowering audit is tracked as an open item for a follow-up commit.
+
+## Phase 15: Test Coverage — Router Tests & CI Fix (2026-08-20)
+
+> `tpt-telos-router` (606 lines) had zero test coverage despite driving all `@boundary(...)`
+> dispatch decisions. A comprehensive test suite was added covering all flags, priority ordering,
+> conflict diagnostics, @state(...) parsing, and helper methods. Also tracks the CI action name
+> audit.
+
+- [x] **Router test suite** — 30+ named tests in `tests/router.rs` covering: all Rust/Go/Python
+  boundary flags individually, priority ordering (Python > Go > Rust), all diagnostic kinds
+  (`RealTimeGoConflict`, `ZeroAllocGoConflict`, `RealTimePythonConflict`, `ZeroAllocPythonConflict`,
+  `UnrecognizedBoundaryFlag`, `UnrecognizedStateValue`), `@state(persistent|ephemeral)` parsing,
+  `route()` vs `route_checked()` consistency, `is_rust()` helper, and non-boundary attribute
+  passthrough. (`crates/tpt-telos-router/tests/router.rs`)
+- [ ] **CI action name audit** — verify whether `taiki197/install-action@cargo-llvm-cov` in
+  `.github/workflows/ci.yml` is correct or should be `taiki-e/install-action`. Fix if it's a typo.
+  (`.github/workflows/ci.yml`)
+
+## Phase 16: `tpt-telos-prove` Standalone Crate (2026-08-20)
+
+> Extract the `telos-prove` binary from `tpt-telos-sdk` into its own minimal crate with only
+> `tpt-telos-verifier` as a dependency, enabling `cargo install tpt-telos-prove` without pulling
+> in codegen, LSP, or agent crates. Keeps the SDK as a pure library.
+
+- [x] New crate `crates/tpt-telos-prove/` with `Cargo.toml` + `src/main.rs` (adapted from
+  `crates/tpt-telos-sdk/src/bin/telos-prove.rs`)
+- [x] Copy hand-rolled JSON reader + constraint-group prove logic from `tpt-telos-sdk`
+  into the new crate (`src/json.rs`, `src/contradiction.rs`, `src/prove.rs`)
+- [x] Add `crates/tpt-telos-prove` to workspace `Cargo.toml` members
+- [x] 17 unit tests passing across json/contradiction/prove modules
+- [x] `crates/tpt-telos-prove/README.md` with install/usage/schema docs
+- [ ] Remove or replace `tpt-telos-sdk`'s `telos-prove` binary (shim or delete)
+- [ ] Update `CLAUDE.md` workspace-layout section and SDK README
+
+## Phase 17: Equality-Substitution Preprocessing in the Verifier (2026-08-20)
+
+> Add an `equality_substitute` preprocessing pass before Fourier-Motzkin elimination. When the
+> constraint set contains `x == linear_expr`, substitute `x → linear_expr` everywhere else and
+> remove the defining equality, then repeat to fixpoint. Sound and complete for QF_LRA. Makes
+> proof chains explicit and auditable — critical for the "high-consequence numeric module" use case.
+> Unlocks canonical ledger / rate-limiter / quota-tracker / FSM verification with minimal contracts.
+
+- [ ] `equality_substitute(constraints: &mut Vec<Constraint>)` in `solver.rs` — scan for `Eq`
+  where one side is a single variable, substitute to fixpoint, remove defining equalities
+  (`crates/tpt-telos-verifier/src/solver.rs`)
+- [ ] Call `equality_substitute` at the top of `verify()` / `unsat_checked()` before FM elimination
+- [ ] New test file `crates/tpt-telos-verifier/tests/substitution.rs` — ledger, rate-limiter,
+  quota, FSM cases; chained substitutions
+- [ ] New example fixtures: `examples/ledger.telos`, `examples/rate_limiter.telos`,
+  `examples/quota.telos` — wired into `tpt-telos/tests/cli.rs`
+
+## Phase 18: Language Extensions (2026-08-20)
+
+> Three targeted language/IR improvements: boolean literal support (`true`/`false`), `match` arms
+> with `mutate state` blocks, and array length constraint extraction.
+
+- [ ] **Boolean literals** — `true`/`false` parsed as `Expr::Bool(bool)`, lowered to `1`/`0`
+  in the IR (FM solver unchanged), emitted as `true`/`false` in Rust/Go/Python codegen.
+  Update `grammar.ebnf`, lexer, AST, IR extract, codegen, and pretty-printer.
+  (`crates/tpt-telos-parser/src/{lexer,ast}.rs`, `crates/tpt-telos-ir/src/extract.rs`,
+  `crates/tpt-telos-codegen/src/{lib,go,python}.rs`)
+- [ ] **`match` with `mutate state` arms** — extend `extract_stmt` for `Stmt::Match` to support
+  `mutate state` inside arm bodies; each arm becomes a separate DNF branch.
+  (`crates/tpt-telos-ir/src/extract.rs` around line 921)
+- [ ] **Array length IR constraints** — extract `arr.len() == N` comparisons in `requires`/
+  `ensures` into `Constraint::Eq` pairs. Symbolic index support stays out-of-scope.
+  (`crates/tpt-telos-ir/src/extract.rs`)
+
+## Phase 19: DX & Ecosystem (2026-08-20)
+
+> Three ecosystem improvements: LSP workspace-wide symbol index, FFI type expansion, and Go
+> payload-carrying enum codegen.
+
+- [ ] **LSP workspace symbol index** — implement `workspace/didChangeWatchedFiles` /
+  `workspace/symbol` with a background indexer scanning all `.telos` files on `initialize`.
+  Wire into definition/references/completion handlers.
+  (`crates/tpt-telos-lsp/src/analysis.rs`, `lib.rs`)
+- [ ] **FFI bridge: `f64` and flattened nested struct fields** — extend `ffi.rs` to support
+  `f64` (passed as `u64` bit patterns + transmute) and nested struct fields expanded field-by-field.
+  (`crates/tpt-telos-codegen/src/ffi.rs`)
+- [ ] **Go payload-carrying enum variants** — emit tagged structs per variant with a `Kind`
+  discriminant field (Go's idiomatic sum-type pattern).
+  (`crates/tpt-telos-codegen/src/go.rs`)

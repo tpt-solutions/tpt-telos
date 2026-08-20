@@ -487,3 +487,41 @@ fn doctor_runs_human_readable() {
         "expected `z3` in doctor output:\n{stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 17: equality-substitution example fixtures
+// ---------------------------------------------------------------------------
+
+const LEDGER: &str = "../../examples/ledger.telos";
+const RATE_LIMITER: &str = "../../examples/rate_limiter.telos";
+const QUOTA: &str = "../../examples/quota.telos";
+
+#[test]
+fn verify_ledger_passes() {
+    let (ok, stdout, _) = run(&["verify", LEDGER]);
+    assert!(ok, "ledger.telos should verify cleanly:\n{stdout}");
+    assert!(
+        stdout.contains("all constraints satisfied"),
+        "expected success summary:\n{stdout}"
+    );
+}
+
+#[test]
+fn verify_rate_limiter_passes() {
+    let (ok, stdout, _) = run(&["verify", RATE_LIMITER]);
+    assert!(ok, "rate_limiter.telos should verify cleanly:\n{stdout}");
+    assert!(
+        stdout.contains("all constraints satisfied"),
+        "expected success summary:\n{stdout}"
+    );
+}
+
+#[test]
+fn verify_quota_passes() {
+    let (ok, stdout, _) = run(&["verify", QUOTA]);
+    assert!(ok, "quota.telos should verify cleanly:\n{stdout}");
+    assert!(
+        stdout.contains("all constraints satisfied"),
+        "expected success summary:\n{stdout}"
+    );
+}
