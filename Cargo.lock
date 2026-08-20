@@ -1224,6 +1224,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpt-telos-prove"
+version = "0.2.0"
+dependencies = [
+ "tpt-telos-ir",
+ "tpt-telos-parser",
+ "tpt-telos-verifier",
+]
+
+[[package]]
 name = "tpt-telos-router"
 version = "0.2.0"
 dependencies = [
@@ -1268,25 +1277,14 @@ dependencies = [
 [[package]]
 name = "tpt-uir-core"
 version = "0.1.0"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "tpt-uir-dialects"
 version = "0.1.0"
-dependencies = [
- "tpt-uir-core",
-]
 
 [[package]]
 name = "tpt-uir-serde"
 version = "0.1.0"
-dependencies = [
- "postcard",
- "serde",
- "tpt-uir-core",
-]
 
 [[package]]
 name = "typenum"

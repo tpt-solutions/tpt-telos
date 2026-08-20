@@ -149,8 +149,103 @@ pub fn unsat(cs: &[Constraint]) -> bool {
 /// let ge0 = Constraint(Linear::var("x"), Relation::Ge);
 /// assert_eq!(unsat_checked(&[ge0]), Some(false));
 /// ```
+/// Preprocessing pass: substitute away equality-defined variables before FM elimination.
+///
+/// For each `Eq` constraint where some variable appears with coefficient ±1,
+/// substitute that variable (isolated from the equality) into every other
+/// constraint in the set, then remove the defining equality. Runs to fixpoint,
+/// so chained equalities (`x == a + b`, `y == x + c`) are fully resolved.
+///
+/// This is sound and complete for QF_LRA equalities and makes proof chains
+/// explicit, enabling the solver to verify patterns like:
+/// ```text
+/// balance = old(balance) + deposit - withdrawal
+/// requires deposit >= 0 && old(balance) >= withdrawal
+/// ensures balance >= 0   // proven: old(balance) + deposit - withdrawal >= 0
+/// ```
+///
+/// # Examples
+///
+/// ```
+/// use tpt_telos_ir::{Constraint, Linear, Relation};
+/// use tpt_telos_verifier::equality_substitute;
+///
+/// // balance == old + deposit (encoded as balance - old - deposit == 0)
+/// let def = Constraint(
+///     Linear::var("balance")
+///         .sub(&Linear::var("old"))
+///         .sub(&Linear::var("deposit")),
+///     Relation::Eq,
+/// );
+/// // ensures balance >= 0 (encoded as balance >= 0)
+/// let goal = Constraint(Linear::var("balance"), Relation::Ge);
+/// let mut cs = vec![def, goal];
+/// equality_substitute(&mut cs);
+/// // After substitution: [old + deposit >= 0]  (balance is eliminated)
+/// assert_eq!(cs.len(), 1);
+/// assert!(cs[0].0.terms.iter().any(|(v, _)| v == "old"));
+/// ```
+pub fn equality_substitute(cs: &mut Vec<Constraint>) {
+    loop {
+        // Find an Eq constraint that has at least one variable with coefficient ±1.
+        let found = cs.iter().enumerate().find_map(|(i, c)| {
+            if c.1 != Relation::Eq {
+                return None;
+            }
+            c.0.terms
+                .iter()
+                .position(|(_, coeff)| *coeff == 1 || *coeff == -1)
+                .map(|var_pos| (i, var_pos))
+        });
+
+        let Some((def_idx, var_pos)) = found else {
+            break;
+        };
+
+        // Clone the defining equality and remove it from the set.
+        let def = cs.remove(def_idx);
+        let (var_name, coeff_x) = def.0.terms[var_pos].clone(); // coeff_x is ±1
+
+        // Substitute `var_name → (-rest_terms - constant) / coeff_x` into every
+        // remaining constraint that mentions `var_name`.
+        //
+        // For coeff_x = 1:  var = -sum(c_i * v_i) - K  → factor for each term: -c_i
+        // For coeff_x = -1: var =  sum(c_i * v_i) + K  → factor for each term: +c_i
+        // In both cases: added_coeff_for_v_i = d_x * (-c_i / coeff_x)
+        // And: delta_constant = d_x * (-def.constant / coeff_x)
+        for c in cs.iter_mut() {
+            let Some(pos) = c.0.terms.iter().position(|(v, _)| *v == var_name) else {
+                continue;
+            };
+            let d_x = c.0.terms[pos].1;
+            c.0.terms.remove(pos);
+
+            for (v, c_i) in &def.0.terms {
+                if *v == var_name {
+                    continue;
+                }
+                let added = d_x * (-c_i / coeff_x);
+                if let Some(p) = c.0.terms.iter().position(|(u, _)| *u == *v) {
+                    c.0.terms[p].1 += added;
+                    if c.0.terms[p].1 == 0 {
+                        c.0.terms.remove(p);
+                    }
+                } else {
+                    c.0.terms.push((v.clone(), added));
+                }
+            }
+            c.0.constant += d_x * (-def.0.constant / coeff_x);
+        }
+    }
+}
+
 pub fn unsat_checked(cs: &[Constraint]) -> Option<bool> {
-    let mut ineqs = to_inequalities(cs);
+    // Apply equality substitution first to reduce the constraint set before FM
+    // elimination. This makes proof chains explicit and improves verification of
+    // derived-value patterns (ledgers, rate-limiters, quota trackers).
+    let mut cs_reduced = cs.to_vec();
+    equality_substitute(&mut cs_reduced);
+    let mut ineqs = to_inequalities(&cs_reduced);
 
     // collect variable names
     let mut vars: Vec<String> = Vec::new();

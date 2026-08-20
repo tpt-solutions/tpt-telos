@@ -11,6 +11,7 @@ members = [
     "crates/tpt-telos-cli",
     "crates/out-telos-wasm",
     "crates/tpt-telos-sdk",
+    "crates/tpt-telos-prove",
     "crates/tpt-telos-uir-bridge",
 ]
 

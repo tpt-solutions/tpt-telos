@@ -17,7 +17,8 @@ pub mod verify;
 pub mod z3_solver;
 
 pub use solver::{
-    counterexample, entails, model, negate, satisfies_model, unsat, unsat_checked, Model,
+    counterexample, entails, equality_substitute, model, negate, satisfies_model, unsat,
+    unsat_checked, Model,
 };
 pub use verify::{is_unsat, verify, CheckResult, VerificationResult};
 
@@ -34,24 +35,16 @@ pub enum SolverBackend {
     Z3,
 }
 
-/// Global solver backend setting. Defaults to Fourier-Motzkin.
-static mut SOLVER_BACKEND: SolverBackend = SolverBackend::FourierMotzkin;
+use std::sync::OnceLock;
 
-/// Set the global solver backend.
-///
-/// # Safety
-///
-/// This uses a static mutable variable and is not thread-safe. Call only
-/// during single-threaded initialization (e.g., at CLI startup).
+static SOLVER_BACKEND: OnceLock<SolverBackend> = OnceLock::new();
+
+/// Set the global solver backend. Has no effect if already set.
 pub fn set_solver_backend(backend: SolverBackend) {
-    // SAFETY: called during single-threaded CLI initialization.
-    unsafe {
-        SOLVER_BACKEND = backend;
-    }
+    let _ = SOLVER_BACKEND.set(backend);
 }
 
 /// Get the current solver backend.
 pub fn solver_backend() -> SolverBackend {
-    // SAFETY: read is atomic on all supported platforms for single-word enums.
-    unsafe { SOLVER_BACKEND }
+    SOLVER_BACKEND.get().copied().unwrap_or_default()
 }
