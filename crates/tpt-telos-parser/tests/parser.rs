@@ -274,6 +274,67 @@ fn rejects_attribute_on_invariant() {
 }
 
 #[test]
+fn parses_resource_attribute_on_invariant() {
+    let m =
+        parse_one(r#"module M { @resource(class = "db:users") invariant Count { value >= 0 } }"#);
+    let Item::Invariant(inv) = &m.items[0] else {
+        panic!("expected an invariant item");
+    };
+    assert_eq!(inv.resource_class(), Some("db:users"));
+}
+
+#[test]
+fn parses_resource_attribute_on_struct() {
+    let m = parse_one(
+        r#"module M { @resource(class = "filesystem:/data") struct Blob { size: Int } }"#,
+    );
+    let Item::Struct(s) = &m.items[0] else {
+        panic!("expected a struct item");
+    };
+    assert_eq!(s.resource_class(), Some("filesystem:/data"));
+}
+
+#[test]
+fn invariant_without_resource_attribute_has_no_class() {
+    let m = parse_one("module M { invariant Count { value >= 0 } }");
+    let Item::Invariant(inv) = &m.items[0] else {
+        panic!("expected an invariant item");
+    };
+    assert_eq!(inv.resource_class(), None);
+}
+
+#[test]
+fn rejects_non_resource_attribute_on_invariant() {
+    // @resource is the one exception; every other attribute name is still
+    // rejected on invariant/struct exactly as before this attribute existed.
+    assert!(parse("module M { @eject invariant Wallet { balance >= 0 } }").is_err());
+    assert!(
+        parse(r#"module M { @boundary(cpu_bound) invariant Wallet { balance >= 0 } }"#).is_err()
+    );
+}
+
+#[test]
+fn rejects_attribute_on_enum_including_resource() {
+    assert!(parse(r#"module M { @resource(class = "db:x") enum E { A, B } }"#).is_err());
+}
+
+#[test]
+fn rejects_resource_attribute_without_class_arg() {
+    assert!(parse("module M { @resource invariant Count { value >= 0 } }").is_err());
+    assert!(parse("module M { @resource(cpu_bound) invariant Count { value >= 0 } }").is_err());
+}
+
+#[test]
+fn parses_string_literal_in_attribute() {
+    let m = parse_one(r#"@resource(class = "filesystem:/data") module M { }"#);
+    let a = &m.attributes[0];
+    assert_eq!(a.name, "resource");
+    assert!(
+        matches!(&a.args[0], Arg::Kv(k, Literal::Str(v)) if k == "class" && v == "filesystem:/data")
+    );
+}
+
+#[test]
 fn rejects_unexpected_token_at_module_level() {
     assert!(parse("module M { } ???").is_err());
 }

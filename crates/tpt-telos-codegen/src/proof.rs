@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 use tpt_telos_agent::FuncOutcome;
+use tpt_telos_ir::AccessMode;
 
 /// Per-function proof record.
 #[derive(Debug, Clone)]
@@ -27,6 +28,13 @@ pub struct FuncProof {
     /// True when at least one constraint was proved via interval-arithmetic
     /// bounding rather than exact linear arithmetic.
     pub used_interval_bounding: bool,
+    /// Which declared resource classes this function touches, and the
+    /// coarsest mode observed against each (see
+    /// [`tpt_telos_ir::VerificationProblem::resource_accesses`]). A derived
+    /// static fact, not something proved -- empty when the function touches
+    /// no `@resource`-tagged state. Sorted by resource class (from the
+    /// `BTreeMap` it's collected from) for deterministic JSON output.
+    pub resource_accesses: Vec<(String, AccessMode)>,
 }
 
 /// The complete proof manifest for one compilation run.
@@ -55,6 +63,12 @@ pub fn generate_manifest(source_bytes: &[u8], outcomes: &[FuncOutcome]) -> Proof
         let conclusions_checked = o.result.checks.len();
         let conclusions_passed = o.result.checks.iter().filter(|c| c.passed).count();
         let used_interval_bounding = o.result.checks.iter().any(|c| c.is_approximation);
+        let resource_accesses: Vec<(String, AccessMode)> = o
+            .problem
+            .resource_accesses
+            .iter()
+            .map(|(class, mode)| (class.clone(), *mode))
+            .collect();
         functions.insert(
             o.func_name.clone(),
             FuncProof {
@@ -62,6 +76,7 @@ pub fn generate_manifest(source_bytes: &[u8], outcomes: &[FuncOutcome]) -> Proof
                 conclusions_checked,
                 conclusions_passed,
                 used_interval_bounding,
+                resource_accesses,
             },
         );
     }
@@ -110,9 +125,16 @@ pub fn to_json(manifest: &ProofManifest) -> String {
             fp.conclusions_passed
         ));
         s.push_str(&format!(
-            "      \"used_interval_bounding\": {}\n",
+            "      \"used_interval_bounding\": {},\n",
             fp.used_interval_bounding
         ));
+        let accesses = fp
+            .resource_accesses
+            .iter()
+            .map(|(class, mode)| format!("[\"{}\", \"{}\"]", class, mode))
+            .collect::<Vec<_>>()
+            .join(", ");
+        s.push_str(&format!("      \"resource_accesses\": [{}]\n", accesses));
         s.push_str(&format!("    }}{}\n", comma));
     }
     s.push_str("  },\n");
@@ -337,6 +359,7 @@ mod tests {
                 func_span: Default::default(),
                 premises: vec![],
                 conclusions: vec![],
+                resource_accesses: Default::default(),
             },
             result: VerificationResult {
                 func_name: name.to_string(),
@@ -370,6 +393,43 @@ mod tests {
         let m1 = generate_manifest(b"module A {}", &[]);
         let m2 = generate_manifest(b"module B {}", &[]);
         assert_ne!(m1.source_hash, m2.source_hash);
+    }
+
+    fn with_resource_accesses(mut o: FuncOutcome, accesses: &[(&str, AccessMode)]) -> FuncOutcome {
+        o.problem.resource_accesses = accesses
+            .iter()
+            .map(|(class, mode)| (class.to_string(), *mode))
+            .collect();
+        o
+    }
+
+    #[test]
+    fn manifest_carries_resource_accesses_through_to_json() {
+        let o = with_resource_accesses(
+            dummy_outcome("bump", true, 1),
+            &[("db:users", AccessMode::Write)],
+        );
+        let m = generate_manifest(b"src", &[o]);
+        assert_eq!(
+            m.functions["bump"].resource_accesses,
+            vec![("db:users".to_string(), AccessMode::Write)]
+        );
+        let json = to_json(&m);
+        assert!(
+            json.contains(r#""resource_accesses": [["db:users", "Write"]]"#),
+            "missing resource_accesses in JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn function_with_no_resource_accesses_serializes_an_empty_array() {
+        let o = dummy_outcome("noop", true, 0);
+        let m = generate_manifest(b"src", &[o]);
+        let json = to_json(&m);
+        assert!(
+            json.contains(r#""resource_accesses": []"#),
+            "expected an empty array: {json}"
+        );
     }
 
     #[test]

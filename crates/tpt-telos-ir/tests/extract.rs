@@ -5,7 +5,7 @@
 //! invariant entry and maintenance, frame axioms, `old(...)` inside nested
 //! arithmetic, and rejection of unsupported non-linear constructs.
 
-use tpt_telos_ir::{extract, Constraint, Linear, Relation};
+use tpt_telos_ir::{extract, AccessMode, Constraint, Linear, Relation};
 use tpt_telos_parser::parse;
 
 // ---- helpers -------------------------------------------------------------
@@ -432,4 +432,100 @@ fn extract_no_disjunction_produces_single_problem() {
     assert_eq!(probs.len(), 1);
     // The func_name should not contain "branch".
     assert!(!probs[0].func_name.contains("branch"));
+}
+
+// ---- resource-class provenance (tpt-writ Phase 4) -------------------------
+
+#[test]
+fn read_only_access_to_a_tagged_invariant_is_reported_as_read() {
+    let src = r#"
+        module M {
+            @resource(class = "db:users") invariant Count { value >= 0 }
+            func peek(c: Count) { }
+        }
+    "#;
+    let p = first_problem(src);
+    assert_eq!(p.resource_accesses.get("db:users"), Some(&AccessMode::Read));
+}
+
+#[test]
+fn mutation_of_a_tagged_invariant_is_reported_as_write() {
+    let src = r#"
+        module M {
+            @resource(class = "db:users") invariant Count { value >= 0 }
+            func bump(c: Count, n: PositiveInt)
+                ensures c.value == old(c.value) + n
+            { mutate state { c.value += n } }
+        }
+    "#;
+    let p = first_problem(src);
+    assert_eq!(
+        p.resource_accesses.get("db:users"),
+        Some(&AccessMode::Write)
+    );
+}
+
+#[test]
+fn untagged_state_earns_no_resource_access_entry() {
+    let src = r#"
+        module M {
+            invariant Count { value >= 0 }
+            func bump(c: Count, n: PositiveInt)
+                ensures c.value == old(c.value) + n
+            { mutate state { c.value += n } }
+        }
+    "#;
+    let p = first_problem(src);
+    assert!(p.resource_accesses.is_empty());
+}
+
+#[test]
+fn touching_two_tagged_resource_classes_reports_both() {
+    let src = r#"
+        module M {
+            @resource(class = "db:senders") invariant Sender { balance >= 0 }
+            @resource(class = "db:receivers") invariant Receiver { balance >= 0 }
+            func transfer(from: Sender, to: Receiver, amount: PositiveInt)
+                requires from.balance >= amount
+                ensures from.balance == old(from.balance) - amount
+                ensures to.balance == old(to.balance) + amount
+            {
+                mutate state {
+                    from.balance -= amount
+                    to.balance += amount
+                }
+            }
+        }
+    "#;
+    let p = first_problem(src);
+    assert_eq!(p.resource_accesses.len(), 2);
+    assert_eq!(
+        p.resource_accesses.get("db:senders"),
+        Some(&AccessMode::Write)
+    );
+    assert_eq!(
+        p.resource_accesses.get("db:receivers"),
+        Some(&AccessMode::Write)
+    );
+}
+
+#[test]
+fn resource_tagged_struct_params_are_tracked_the_same_way() {
+    // Structs (unlike invariant types) have no invariant-fields fallback, so
+    // this exercises the actual field-reference path through `requires`
+    // rather than the auto-inserted "every invariant field is referenced"
+    // shortcut the invariant-typed tests above benefit from.
+    let src = r#"
+        module M {
+            @resource(class = "filesystem:/data") struct Blob { size: Int }
+            func peek_size(b: Blob)
+                requires b.size >= 0
+            { }
+        }
+    "#;
+    let p = first_problem(src);
+    assert_eq!(
+        p.resource_accesses.get("filesystem:/data"),
+        Some(&AccessMode::Read)
+    );
 }

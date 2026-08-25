@@ -4,7 +4,32 @@
 //! `coefficient * variable` plus a constant, compared against zero.
 //! This is the fragment handled by the QF_LRA solver in `telos-verifier`.
 
+use std::collections::BTreeMap;
+
 pub use tpt_telos_parser::Span;
+
+/// How a function touches one resource class's fields, per
+/// [`VerificationProblem::resource_accesses`]. Not a proof obligation --
+/// there is nothing here for the verifier to entail -- just a derived static
+/// fact carried alongside the premises/conclusions it was extracted with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AccessMode {
+    /// Every touched field of this resource class was only read.
+    Read,
+    /// At least one touched field of this resource class was written
+    /// (dominates `Read` even if other fields of the same class were only
+    /// read: the coarser mode is reported for the whole class).
+    Write,
+}
+
+impl std::fmt::Display for AccessMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AccessMode::Read => write!(f, "Read"),
+            AccessMode::Write => write!(f, "Write"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Relation {
@@ -177,6 +202,12 @@ pub struct VerificationProblem {
     pub premises: Vec<Constraint>,
     /// Properties that must be proven from the premises.
     pub conclusions: Vec<Conclusion>,
+    /// Which declared resource classes (from `@resource(class = "...")` on an
+    /// `invariant`/`struct`) this function's body touches, and the coarsest
+    /// mode observed against each. A field on an untagged type contributes no
+    /// entry here at all -- it is simply not resource-tracked. This is a
+    /// derived fact, not something the verifier proves.
+    pub resource_accesses: BTreeMap<String, AccessMode>,
 }
 
 #[derive(Debug, Clone)]

@@ -12,7 +12,7 @@
 //! pre-state name.
 
 use crate::ir::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tpt_telos_parser::ast::*;
 
 /// Per-variable lower and upper bounds derived from premise constraints.
@@ -1113,14 +1113,30 @@ pub fn extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String> {
     // variable names used in the invariant's constraints (e.g. `Wallet {
     // balance >= 0 }` => field `balance`).
     let mut invariant_fields: HashMap<String, HashSet<String>> = HashMap::new();
+    // Declared resource class per type name, from `@resource(class = "...")`
+    // on an `invariant` or `struct` item -- the only two item kinds it's
+    // accepted on. Used below to attribute a touched field back to a
+    // resource class via the field's base variable's declared type.
+    let mut resource_classes: HashMap<String, String> = HashMap::new();
     for m in modules {
         for item in &m.items {
-            if let Item::Invariant(inv) = item {
-                invariants.insert(inv.name.clone(), inv);
-                let entry = invariant_fields.entry(inv.name.clone()).or_default();
-                for c in &inv.constraints {
-                    collect_vars(c, entry);
+            match item {
+                Item::Invariant(inv) => {
+                    invariants.insert(inv.name.clone(), inv);
+                    let entry = invariant_fields.entry(inv.name.clone()).or_default();
+                    for c in &inv.constraints {
+                        collect_vars(c, entry);
+                    }
+                    if let Some(class) = inv.resource_class() {
+                        resource_classes.insert(inv.name.clone(), class.to_string());
+                    }
                 }
+                Item::Struct(s) => {
+                    if let Some(class) = s.resource_class() {
+                        resource_classes.insert(s.name.clone(), class.to_string());
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1143,6 +1159,7 @@ pub fn extract(modules: &[Module]) -> Result<Vec<VerificationProblem>, String> {
                     f,
                     &invariants,
                     &invariant_fields,
+                    &resource_classes,
                     &func_specs,
                 )?);
             }
@@ -1281,6 +1298,7 @@ fn build_problems(
     func: &Func,
     invariants: &HashMap<String, &Invariant>,
     invariant_fields: &HashMap<String, HashSet<String>>,
+    resource_classes: &HashMap<String, String>,
     func_specs: &HashMap<String, &Func>,
 ) -> Result<Vec<VerificationProblem>, String> {
     let var_fn = |name: &str| name.to_string();
@@ -1385,6 +1403,38 @@ fn build_problems(
         &pre_fn,
         &var_fn,
     )?;
+
+    // Resource-class provenance (tpt-writ's Phase 4): a derived static fact,
+    // not a proof obligation -- there is nothing here for the verifier to
+    // entail. Which declared resource classes (from `@resource(class = "...")`
+    // on the base variable's type) does this function's body touch, and what
+    // is the coarsest mode observed against each? A field written in *any*
+    // branch counts as `Write` for the whole function, and a field on a type
+    // with no `@resource` tag contributes no entry at all -- same fail-closed
+    // spirit as the rest of this pipeline: report the coarser fact when in
+    // doubt, and stay silent (rather than guess `Read`) when untracked.
+    let mut written: HashSet<(String, String)> = HashSet::new();
+    for b in &body_branches {
+        written.extend(b.assigned.iter().cloned());
+    }
+    let mut resource_accesses: BTreeMap<String, AccessMode> = BTreeMap::new();
+    for (base, field) in &referenced {
+        let Some(param) = func.params.iter().find(|p| &p.name == base) else {
+            continue;
+        };
+        let Some(class) = resource_classes.get(param.ty.name()) else {
+            continue;
+        };
+        let mode = if written.contains(&(base.clone(), field.clone())) {
+            AccessMode::Write
+        } else {
+            AccessMode::Read
+        };
+        resource_accesses
+            .entry(class.clone())
+            .and_modify(|m| *m = (*m).max(mode))
+            .or_insert(mode);
+    }
 
     // Cartesian product: every premise branch paired with every body branch.
     // Each combined branch gets that body branch's extra (if-condition)
@@ -1504,6 +1554,7 @@ fn build_problems(
             func_span: func.span,
             premises: premises.clone(),
             conclusions,
+            resource_accesses: resource_accesses.clone(),
         });
     }
 

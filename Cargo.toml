@@ -12,7 +12,19 @@ members = [
     "crates/out-telos-wasm",
     "crates/tpt-telos-sdk",
     "crates/tpt-telos-prove",
-    "crates/tpt-telos-uir-bridge",
+    # tpt-telos-uir-bridge is intentionally NOT a workspace member here. Its `uir`
+    # feature is off by default and the crate compiles to a stub without it, but
+    # that doesn't help at the *workspace* level: Cargo loads every `members`
+    # manifest (including optional path deps' Cargo.toml files) to build the
+    # shared lockfile, regardless of `default-members` or which features are
+    # enabled -- confirmed by testing here, `default-members` cannot route
+    # around this. Its `tpt-uir-core`/`tpt-uir-dialects`/`tpt-uir-serde` path
+    # deps point at a sibling `../../tpt-uir` checkout that isn't present on
+    # every machine, so plain `cargo check`/`cargo check --workspace` fail
+    # outright with it listed here unless that sibling repo exists. Build it
+    # directly instead when `tpt-uir` is checked out:
+    # `cargo check --manifest-path crates/tpt-telos-uir-bridge/Cargo.toml`.
+    # "crates/tpt-telos-uir-bridge",
 ]
 
 [workspace.package]

@@ -19,6 +19,10 @@ SUPPORTED (verifier + all backends):
   Refinement type         PositiveInt      (built-in; treated as Int with balance >= 0 premise)
   Module attributes       @boundary(...)   (routing), @state(...)  (storage class: persistent|ephemeral)
   Function attributes     @eject           (compile as trusted opaque + contract guard)
+  Resource attributes     @resource(class = "...") on invariant/struct  (declares the resource
+                              class a type's fields belong to; the only attribute accepted on
+                              those two item kinds -- consumed by tpt-telos-ir's per-function
+                              field-access tracking, surfaced in the proof manifest)
   Routing flags           cpu_bound  zero_allocation  crypto  real_time      → Rust
                           network_io  high_concurrency  distributed  high_latency → Go
                           ml_training  python  jax                            → Python
@@ -61,7 +65,9 @@ PARTIAL / LIMITED:
   Array/slice contracts   Constant-index access (arr[0]) in contracts; symbolic indices rejected
 
 UNSUPPORTED (parse error or silent drop):
-  Strings / booleans      no string or bool literal types
+  Strings / booleans      no string expression type or bool literal type; a string *literal*
+                              exists only as an attribute argument (e.g. `@resource(class = "...")`),
+                              not as a value in requires/ensures/statements/expressions
   Symbolic array indices  non-constant index in contracts rejected
   Array length invariants  arrays parsed ([T; N]) but no IR length/index constraint extraction
   Cross-module refs       invariant types resolve across modules (global invariant lookup works)
@@ -86,8 +92,9 @@ arglist        ::= arg ( "," arg )*
 
 arg            ::= IDENT                      // flag, e.g. cpu_bound
                  | IDENT "=" literal          // key/value, e.g. replication_factor = 3
+                                               // or class = "db:users"
 
-literal        ::= INT | IDENT
+literal        ::= INT | IDENT | STRING
 
 --------------------------------------------------------------------------------
 Items
@@ -98,7 +105,7 @@ item           ::= invariant
                  | struct_def
                  | enum_def
 
-invariant      ::= "invariant" IDENT "{"
+invariant      ::= resource_attribute? "invariant" IDENT "{"
                        constraint ( ";" constraint )* ";"?
                    "}"
 
@@ -106,9 +113,13 @@ func           ::= "func" IDENT "(" params? ")" [ "->" type ]
                        clause*
                        block | ";"
 
-struct_def     ::= "struct" IDENT "{"
+struct_def     ::= resource_attribute? "struct" IDENT "{"
                        field_def ( "," field_def )* ","?
                    "}"
+
+// invariant/struct accept exactly this one attribute (any other attribute
+// name there is a parse error, same as before @resource existed).
+resource_attribute ::= "@" "resource" "(" "class" "=" STRING ")"
 
 enum_def       ::= "enum" IDENT "{"
                        variant_def ( "," variant_def )* ","?

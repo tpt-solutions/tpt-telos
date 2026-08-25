@@ -4,6 +4,31 @@ use crate::ast::*;
 use crate::lexer::{lex, Token};
 use crate::span::{LineIndex, Span};
 
+/// `invariant`/`struct` items accept only `@resource(class = "...")` among
+/// their attributes; every other attribute name is rejected there exactly as
+/// it always has been. Also validates `@resource`'s own shape, since nothing
+/// downstream re-checks it once parsing succeeds.
+fn reject_non_resource_attributes(attrs: &[Attribute], item_kind: &str) -> Result<(), String> {
+    for attr in attrs {
+        if attr.name != "resource" {
+            return Err(format!(
+                "attributes are not supported on `{item_kind}` items (found `@{}`; only `@resource(class = \"...\")` is accepted here)",
+                attr.name
+            ));
+        }
+        let has_valid_class_arg = attr
+            .args
+            .iter()
+            .any(|a| matches!(a, Arg::Kv(key, Literal::Str(_)) if key == "class"));
+        if !has_valid_class_arg {
+            return Err(format!(
+                "`@resource` on a `{item_kind}` item requires a `class = \"...\"` string argument"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub struct Parser {
     tokens: Vec<(Token, usize, usize)>,
     pos: usize,
@@ -159,6 +184,10 @@ impl Parser {
                                 self.advance();
                                 Literal::Ident(s)
                             }
+                            Token::Str(s) => {
+                                self.advance();
+                                Literal::Str(s)
+                            }
                             other => {
                                 return Err(format!(
                                     "expected literal in attribute, found {}",
@@ -191,17 +220,13 @@ impl Parser {
         }
         match self.peek() {
             Token::KwInvariant => {
-                if !attributes.is_empty() {
-                    return Err("attributes are not supported on `invariant` items".to_string());
-                }
-                Ok(Item::Invariant(self.parse_invariant()?))
+                reject_non_resource_attributes(&attributes, "invariant")?;
+                Ok(Item::Invariant(self.parse_invariant(attributes)?))
             }
             Token::KwFunc => Ok(Item::Func(self.parse_func(attributes)?)),
             Token::KwStruct => {
-                if !attributes.is_empty() {
-                    return Err("attributes are not supported on `struct` items".to_string());
-                }
-                Ok(Item::Struct(self.parse_struct_def()?))
+                reject_non_resource_attributes(&attributes, "struct")?;
+                Ok(Item::Struct(self.parse_struct_def(attributes)?))
             }
             Token::KwEnum => {
                 if !attributes.is_empty() {
@@ -216,7 +241,12 @@ impl Parser {
         }
     }
 
-    fn parse_invariant(&mut self) -> Result<Invariant, String> {
+    /// `invariant`/`struct` accept exactly one attribute, `@resource(...)`
+    /// (tagging the type's fields with a resource class for `tpt-writ`-style
+    /// downstream consumers) -- everything else that's valid on a `func` or
+    /// `module` (`@eject`, `@boundary`, `@state`, ...) still has no meaning
+    /// here and stays rejected, same as before this attribute existed.
+    fn parse_invariant(&mut self, attributes: Vec<Attribute>) -> Result<Invariant, String> {
         let span = self.current_span();
         self.expect(Token::KwInvariant)?;
         let name = self.expect_ident()?;
@@ -232,6 +262,7 @@ impl Parser {
         }
         self.expect(Token::RBrace)?;
         Ok(Invariant {
+            attributes,
             name,
             constraints,
             span,
@@ -239,7 +270,7 @@ impl Parser {
         })
     }
 
-    fn parse_struct_def(&mut self) -> Result<StructDef, String> {
+    fn parse_struct_def(&mut self, attributes: Vec<Attribute>) -> Result<StructDef, String> {
         self.expect(Token::KwStruct)?;
         let name = self.expect_ident()?;
         self.expect(Token::LBrace)?;
@@ -257,7 +288,11 @@ impl Parser {
             }
         }
         self.expect(Token::RBrace)?;
-        Ok(StructDef { name, fields })
+        Ok(StructDef {
+            attributes,
+            name,
+            fields,
+        })
     }
 
     fn parse_enum_def(&mut self) -> Result<EnumDef, String> {

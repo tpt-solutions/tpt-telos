@@ -7,6 +7,7 @@ use std::fmt;
 pub enum Token {
     Ident(String),
     Int(i64),
+    Str(String),
     At,
     LParen,
     RParen,
@@ -68,6 +69,7 @@ impl fmt::Display for Token {
         let s = match self {
             Token::Ident(s) => return write!(f, "identifier `{s}`"),
             Token::Int(n) => return write!(f, "integer `{n}`"),
+            Token::Str(s) => return write!(f, "string `\"{s}\"`"),
             Token::At => "@",
             Token::LParen => "(",
             Token::RParen => ")",
@@ -209,6 +211,42 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
             continue;
         }
 
+        // string literals: `"..."`, with `\"` and `\\` escapes. Used today
+        // only by annotation args (e.g. `@resource(class = "db:users")`) --
+        // there is no string type/expression in the language itself.
+        if c == '"' {
+            i += 1; // consume opening quote
+            let mut s = String::new();
+            let mut closed = false;
+            while i < chars.len() {
+                match chars[i] {
+                    '"' => {
+                        i += 1;
+                        closed = true;
+                        break;
+                    }
+                    '\n' => break,
+                    '\\' if i + 1 < chars.len()
+                        && (chars[i + 1] == '"' || chars[i + 1] == '\\') =>
+                    {
+                        s.push(chars[i + 1]);
+                        i += 2;
+                    }
+                    ch => {
+                        s.push(ch);
+                        i += 1;
+                    }
+                }
+            }
+            if !closed {
+                return Err(format!(
+                    "unterminated string literal starting at offset {start}"
+                ));
+            }
+            tokens.push((Token::Str(s), start, i));
+            continue;
+        }
+
         // integers
         if c.is_ascii_digit() {
             let mut s = String::new();
@@ -317,6 +355,14 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, String> {
 pub fn int_to_literal(tok: &Token) -> Option<Literal> {
     match tok {
         Token::Int(n) => Some(Literal::Int(*n)),
+        _ => None,
+    }
+}
+
+/// Helper used by the parser to turn a STRING token into a literal when needed.
+pub fn str_to_literal(tok: &Token) -> Option<Literal> {
+    match tok {
+        Token::Str(s) => Some(Literal::Str(s.clone())),
         _ => None,
     }
 }

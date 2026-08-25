@@ -5,7 +5,7 @@
 //! reporting for unexpected characters.
 
 use tpt_telos_parser::ast::Literal;
-use tpt_telos_parser::lexer::{int_to_literal, lex, Token};
+use tpt_telos_parser::lexer::{int_to_literal, lex, str_to_literal, Token};
 
 fn toks(src: &str) -> Vec<Token> {
     lex(src).unwrap().into_iter().map(|(t, _, _)| t).collect()
@@ -169,4 +169,31 @@ fn int_out_of_range_is_an_error() {
 fn int_to_literal_helper() {
     assert_eq!(int_to_literal(&Token::Int(7)), Some(Literal::Int(7)));
     assert_eq!(int_to_literal(&Token::Ident("x".into())), None);
+}
+
+#[test]
+fn lexes_string_literals() {
+    let toks = toks(r#""filesystem:/data""#);
+    assert_eq!(toks[0], Token::Str("filesystem:/data".to_string()));
+}
+
+#[test]
+fn lexes_string_literal_escapes() {
+    let toks = toks(r#""a\"b\\c""#);
+    assert_eq!(toks[0], Token::Str("a\"b\\c".to_string()));
+}
+
+#[test]
+fn errors_on_unterminated_string() {
+    let err = lex("\"unterminated").unwrap_err();
+    assert!(err.contains("unterminated"), "error was: {err}");
+}
+
+#[test]
+fn str_to_literal_helper() {
+    assert_eq!(
+        str_to_literal(&Token::Str("x".into())),
+        Some(Literal::Str("x".into()))
+    );
+    assert_eq!(str_to_literal(&Token::Int(1)), None);
 }

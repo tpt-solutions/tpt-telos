@@ -79,6 +79,7 @@ impl Type {
 pub enum Literal {
     Int(i64),
     Ident(String),
+    Str(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +94,19 @@ pub enum Arg {
 pub struct Attribute {
     pub name: String,
     pub args: Vec<Arg>,
+}
+
+/// The declared resource class from a `@resource(class = "...")` attribute,
+/// if one is present in `attrs`. Shared by [`Invariant::resource_class`] and
+/// [`StructDef::resource_class`] -- the only two item kinds `@resource` is
+/// accepted on.
+fn resource_class_of(attrs: &[Attribute]) -> Option<&str> {
+    attrs.iter().find(|a| a.name == "resource").and_then(|a| {
+        a.args.iter().find_map(|arg| match arg {
+            Arg::Kv(key, Literal::Str(class)) if key == "class" => Some(class.as_str()),
+            _ => None,
+        })
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +152,11 @@ impl Item {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invariant {
+    /// Item-level attributes. Only `@resource(class = "...")` is accepted
+    /// here (see the parser's item-attribute check) -- everything else that
+    /// is valid on a `func`/`module` (`@eject`, `@boundary`, `@state`, ...)
+    /// still has no meaning on an invariant and is rejected at parse time.
+    pub attributes: Vec<Attribute>,
     pub name: String,
     /// One or more boolean constraint expressions that must always hold.
     pub constraints: Vec<Expr>,
@@ -147,14 +166,31 @@ pub struct Invariant {
     pub constraint_spans: Vec<Span>,
 }
 
+impl Invariant {
+    /// The declared resource class from `@resource(class = "...")`, if any.
+    pub fn resource_class(&self) -> Option<&str> {
+        resource_class_of(&self.attributes)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Struct / Enum definitions
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructDef {
+    /// Item-level attributes. Only `@resource(class = "...")` is accepted
+    /// here -- see [`Invariant::attributes`].
+    pub attributes: Vec<Attribute>,
     pub name: String,
     pub fields: Vec<FieldDef>,
+}
+
+impl StructDef {
+    /// The declared resource class from `@resource(class = "...")`, if any.
+    pub fn resource_class(&self) -> Option<&str> {
+        resource_class_of(&self.attributes)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

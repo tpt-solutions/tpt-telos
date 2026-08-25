@@ -787,6 +787,7 @@ fn render_literal(l: &Literal) -> String {
     match l {
         Literal::Int(n) => n.to_string(),
         Literal::Ident(s) => s.clone(),
+        Literal::Str(s) => format!("{s:?}"),
     }
 }
 

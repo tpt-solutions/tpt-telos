@@ -149,6 +149,7 @@ mod tests {
                 Relation::Ge,
             )],
             conclusions: vec![],
+            resource_accesses: Default::default(),
         };
         let results = pool.verify_all(&[problem]);
         assert_eq!(results.len(), 1);
@@ -167,6 +168,7 @@ mod tests {
                     Relation::Ge,
                 )],
                 conclusions: vec![],
+                resource_accesses: Default::default(),
             })
             .collect();
         let results = pool.verify_all(&problems);
@@ -185,6 +187,7 @@ mod tests {
                 func_span: Default::default(),
                 premises: vec![],
                 conclusions: vec![],
+                resource_accesses: Default::default(),
             })
             .collect();
         let results = pool.verify_all(&problems);
