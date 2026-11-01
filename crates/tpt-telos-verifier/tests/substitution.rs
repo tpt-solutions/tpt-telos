@@ -47,11 +47,15 @@ fn substitute_chained_equalities() {
     // y == x + c  (y - x - c == 0)
     // After substitution to fixpoint: y == a + b + c
     let def1 = Constraint(
-        Linear::var("x").sub(&Linear::var("a")).sub(&Linear::var("b")),
+        Linear::var("x")
+            .sub(&Linear::var("a"))
+            .sub(&Linear::var("b")),
         Relation::Eq,
     );
     let def2 = Constraint(
-        Linear::var("y").sub(&Linear::var("x")).sub(&Linear::var("c")),
+        Linear::var("y")
+            .sub(&Linear::var("x"))
+            .sub(&Linear::var("c")),
         Relation::Eq,
     );
     let goal = Constraint(Linear::var("y"), Relation::Ge); // y >= 0
@@ -67,8 +71,14 @@ fn substitute_chained_equalities() {
 #[test]
 fn no_substitution_when_no_eq() {
     // No Eq constraint — nothing changes.
-    let c1 = Constraint(Linear::var("x").sub(&Linear::constant_only(3)), Relation::Ge);
-    let c2 = Constraint(Linear::var("x").sub(&Linear::constant_only(10)), Relation::Le);
+    let c1 = Constraint(
+        Linear::var("x").sub(&Linear::constant_only(3)),
+        Relation::Ge,
+    );
+    let c2 = Constraint(
+        Linear::var("x").sub(&Linear::constant_only(10)),
+        Relation::Le,
+    );
     let mut cs = vec![c1.clone(), c2.clone()];
     equality_substitute(&mut cs);
     assert_eq!(cs.len(), 2);
@@ -200,10 +210,7 @@ fn rate_limiter_tokens_nonneg() {
     // used >= 0
     let used_nonneg = Constraint(Linear::var("used"), Relation::Ge);
     // old - used >= 0  (used <= old_tokens)
-    let used_le_old = Constraint(
-        Linear::var("old").sub(&Linear::var("used")),
-        Relation::Ge,
-    );
+    let used_le_old = Constraint(Linear::var("old").sub(&Linear::var("used")), Relation::Ge);
 
     let premises = vec![tokens_def, used_nonneg, used_le_old];
     let conclusion = Constraint(Linear::var("tokens"), Relation::Ge);
@@ -284,10 +291,7 @@ fn state_machine_valid_transition() {
 
     let premises = vec![next_def, delta_is_one, current_not_at_max];
     // ensures: max - next >= 0  (next <= max)
-    let conclusion = Constraint(
-        Linear::var("max").sub(&Linear::var("next")),
-        Relation::Ge,
-    );
+    let conclusion = Constraint(Linear::var("max").sub(&Linear::var("next")), Relation::Ge);
     assert!(
         entails(&premises, &conclusion),
         "FSM: next_state <= max should follow from the transition guard"

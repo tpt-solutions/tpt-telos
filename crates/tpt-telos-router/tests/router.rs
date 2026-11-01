@@ -11,10 +11,7 @@ fn flag_attr(flag: &str) -> Attribute {
 fn flags_attr(flags: &[&str]) -> Attribute {
     Attribute {
         name: "boundary".to_string(),
-        args: flags
-            .iter()
-            .map(|f| Arg::Flag(f.to_string()))
-            .collect(),
+        args: flags.iter().map(|f| Arg::Flag(f.to_string())).collect(),
     }
 }
 
@@ -147,7 +144,9 @@ fn real_time_plus_go_emits_conflict() {
     let (r, diags) = route_checked(&[attr], "ControlLoop");
     assert_eq!(r.target, Target::Go);
     assert!(
-        diags.iter().any(|d| d.kind == DiagnosticKind::RealTimeGoConflict),
+        diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::RealTimeGoConflict),
         "expected RealTimeGoConflict diagnostic"
     );
 }
@@ -158,7 +157,9 @@ fn zero_alloc_plus_go_emits_conflict() {
     let (r, diags) = route_checked(&[attr], "ZeroAllocNet");
     assert_eq!(r.target, Target::Go);
     assert!(
-        diags.iter().any(|d| d.kind == DiagnosticKind::ZeroAllocGoConflict),
+        diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::ZeroAllocGoConflict),
         "expected ZeroAllocGoConflict diagnostic"
     );
 }
@@ -169,7 +170,9 @@ fn real_time_plus_python_emits_conflict() {
     let (r, diags) = route_checked(&[attr], "RtML");
     assert_eq!(r.target, Target::Python);
     assert!(
-        diags.iter().any(|d| d.kind == DiagnosticKind::RealTimePythonConflict),
+        diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::RealTimePythonConflict),
         "expected RealTimePythonConflict diagnostic"
     );
 }
@@ -180,7 +183,9 @@ fn zero_alloc_plus_python_emits_conflict() {
     let (r, diags) = route_checked(&[attr], "ZeroAllocPy");
     assert_eq!(r.target, Target::Python);
     assert!(
-        diags.iter().any(|d| d.kind == DiagnosticKind::ZeroAllocPythonConflict),
+        diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::ZeroAllocPythonConflict),
         "expected ZeroAllocPythonConflict diagnostic"
     );
 }
@@ -191,7 +196,9 @@ fn unrecognized_flag_emits_diagnostic() {
     let (r, diags) = route_checked(&[attr], "MyModule");
     assert_eq!(r.target, Target::Rust);
     assert!(
-        diags.iter().any(|d| d.kind == DiagnosticKind::UnrecognizedBoundaryFlag),
+        diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::UnrecognizedBoundaryFlag),
         "expected UnrecognizedBoundaryFlag diagnostic"
     );
 }
@@ -243,7 +250,9 @@ fn unrecognized_state_value_emits_diagnostic() {
     let (r, diags) = route_checked(&attrs, "MyModule");
     assert_eq!(r.storage, StorageClass::Ephemeral);
     assert!(
-        diags.iter().any(|d| d.kind == DiagnosticKind::UnrecognizedStateValue),
+        diags
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::UnrecognizedStateValue),
         "expected UnrecognizedStateValue diagnostic"
     );
 }
