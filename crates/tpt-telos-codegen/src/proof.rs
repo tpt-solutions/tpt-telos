@@ -344,6 +344,7 @@ mod tests {
                 is_approximation: false,
                 counterexample: None,
                 or_group: None,
+                or_branch: None,
                 location: None,
             })
             .collect();

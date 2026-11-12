@@ -892,6 +892,17 @@ struct JsonCheck {
     is_approximation: bool,
     counterexample: Option<std::collections::HashMap<String, i64>>,
     or_group: Option<usize>,
+    or_branch: Option<usize>,
+    location: Option<JsonLocation>,
+}
+
+/// Verdict of one disjunction group, computed with the branch rule: the group holds if some
+/// DNF branch has every one of its checks passing.
+#[derive(Serialize)]
+struct JsonGroup {
+    or_group: usize,
+    description: String,
+    passed: bool,
     location: Option<JsonLocation>,
 }
 
@@ -900,6 +911,7 @@ struct JsonFuncResult {
     func_name: String,
     all_passed: bool,
     checks: Vec<JsonCheck>,
+    groups: Vec<JsonGroup>,
 }
 
 #[derive(Serialize)]
@@ -976,8 +988,13 @@ fn collect_verify_output(
     let mut overall = true;
     for problem in problems {
         let result = verify(problem);
-        let checks: Vec<JsonCheck> = result
-            .checks
+        // Sorted so the output does not depend on HashMap iteration order.
+        let mut sorted: Vec<&tpt_telos_verifier::CheckResult> = result.checks.iter().collect();
+        sorted.sort_by(|a, b| {
+            (a.location, a.or_group, a.or_branch, &a.description)
+                .cmp(&(b.location, b.or_group, b.or_branch, &b.description))
+        });
+        let checks: Vec<JsonCheck> = sorted
             .iter()
             .map(|c| JsonCheck {
                 description: c.description.clone(),
@@ -986,9 +1003,38 @@ fn collect_verify_output(
                 is_approximation: c.is_approximation,
                 counterexample: c.counterexample.clone(),
                 or_group: c.or_group,
+                or_branch: c.or_branch,
                 location: c
                     .location
                     .map(|(line, col)| JsonLocation { line, column: col }),
+            })
+            .collect();
+        // Group verdicts with the branch rule.
+        let mut by_group: std::collections::BTreeMap<
+            usize,
+            (String, Option<(usize, usize)>, std::collections::BTreeMap<usize, bool>),
+        > = std::collections::BTreeMap::new();
+        for c in &sorted {
+            if let Some(g) = c.or_group {
+                let entry = by_group.entry(g).or_insert_with(|| {
+                    let base = c
+                        .description
+                        .rsplit_once(" [branch ")
+                        .map(|(b, _)| b.to_string())
+                        .unwrap_or_else(|| c.description.clone());
+                    (base, c.location, std::collections::BTreeMap::new())
+                });
+                let ok = entry.2.entry(c.or_branch.unwrap_or(0)).or_insert(true);
+                *ok = *ok && c.passed;
+            }
+        }
+        let groups: Vec<JsonGroup> = by_group
+            .into_iter()
+            .map(|(g, (description, loc, branches))| JsonGroup {
+                or_group: g,
+                description,
+                passed: branches.values().any(|ok| *ok),
+                location: loc.map(|(line, col)| JsonLocation { line, column: col }),
             })
             .collect();
         if !result.all_passed {
@@ -998,6 +1044,7 @@ fn collect_verify_output(
             func_name: result.func_name,
             all_passed: result.all_passed,
             checks,
+            groups,
         });
     }
     (functions, overall)
@@ -1102,7 +1149,15 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
             group_keys.sort();
             for gk in group_keys {
                 let members = &groups[&gk];
-                let group_any_passed = members.iter().any(|c| c.passed);
+                // A DNF branch is a conjunction of its checks. The group passes if any branch
+                // has every check passing. Checking members one at a time is unsound.
+                let mut branch_ok: std::collections::HashMap<usize, bool> =
+                    std::collections::HashMap::new();
+                for c in members {
+                    let e = branch_ok.entry(c.or_branch.unwrap_or(0)).or_insert(true);
+                    *e = *e && c.passed;
+                }
+                let group_any_passed = branch_ok.values().any(|ok| *ok);
                 let group_tag = if group_any_passed {
                     paint(color, GREEN, "PASS")
                 } else {
@@ -1136,6 +1191,11 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
                 if !group_any_passed {
                     overall = false;
                 }
+            }
+
+            // The verifier's verdict is authoritative for this problem.
+            if !result.all_passed {
+                overall = false;
             }
 
             let status = if result.all_passed {

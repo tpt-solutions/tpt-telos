@@ -57,6 +57,7 @@ use tpt_telos_verifier::CheckResult;
 ///     is_approximation: false,
 ///     counterexample: Some(model),
 ///     or_group: None,
+///     or_branch: None,
 ///     location: None,
 /// };
 /// let hint = format_hint(&check);
@@ -158,6 +159,7 @@ mod tests {
             is_approximation: false,
             counterexample: Some(model),
             or_group: None,
+            or_branch: None,
             location: None,
         }
     }

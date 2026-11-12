@@ -252,4 +252,8 @@ pub struct Conclusion {
     /// conclusion in the group must be entailed for the group to pass. When
     /// `None`, the conclusion must be entailed independently.
     pub or_group: Option<usize>,
+    /// Index of the DNF branch within the disjunction group. A branch is a conjunction: it holds
+    /// only when every conclusion sharing this `(or_group, or_branch)` holds. `None` for
+    /// independent conclusions.
+    pub or_branch: Option<usize>,
 }

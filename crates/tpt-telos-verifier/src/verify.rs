@@ -25,6 +25,9 @@ pub struct CheckResult {
     /// group `n` (at least one check in the group must pass). `None` for
     /// independent checks that must each pass individually.
     pub or_group: Option<usize>,
+    /// Index of the DNF branch within the group. All checks sharing `(or_group, or_branch)` must
+    /// pass for the branch to hold.
+    pub or_branch: Option<usize>,
     /// Source location `(line, column)` of the conclusion (an `ensures` clause
     /// or invariant), used by the CLI to render rustc-style caret/underline
     /// diagnostics. `None` for synthetic checks not tied to a source span.
@@ -124,6 +127,7 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
             is_approximation: concl.is_approximation,
             counterexample: ce,
             or_group: concl.or_group,
+            or_branch: concl.or_branch,
             location: Some((concl.location.line, concl.location.col)),
         });
     }
@@ -137,13 +141,16 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
         }
     }
     for group_conclusions in groups.values() {
-        let mut any_passed = false;
+        // Each DNF branch is a conjunction of its constraints. The branch holds only if every
+        // constraint in it is entailed. The group holds if any branch holds. Checking constraints
+        // one at a time as alternatives is unsound: `(A && B) || C` would pass on `A` alone.
+        let mut branch_ok: HashMap<usize, bool> = HashMap::new();
         let mut group_results: Vec<CheckResult> = Vec::new();
         for concl in group_conclusions {
             let passed = check_entails(&problem.premises, &concl.constraint);
-            if passed {
-                any_passed = true;
-            }
+            let branch = concl.or_branch.unwrap_or(0);
+            let entry = branch_ok.entry(branch).or_insert(true);
+            *entry = *entry && passed;
             let ce = if passed {
                 None
             } else {
@@ -156,10 +163,12 @@ pub fn verify(problem: &VerificationProblem) -> VerificationResult {
                 is_approximation: concl.is_approximation,
                 counterexample: ce,
                 or_group: concl.or_group,
+                or_branch: concl.or_branch,
                 location: Some((concl.location.line, concl.location.col)),
             });
         }
-        if !any_passed {
+        let any_branch_holds = branch_ok.values().any(|ok| *ok);
+        if !any_branch_holds {
             all_passed = false;
         }
         checks.extend(group_results);

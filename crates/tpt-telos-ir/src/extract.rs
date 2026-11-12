@@ -1518,6 +1518,7 @@ fn build_problems(
                         is_approximation: approximated,
                         location,
                         or_group: None,
+                        or_branch: None,
                     });
                 }
             } else {
@@ -1535,6 +1536,7 @@ fn build_problems(
                             is_approximation: approximated,
                             location,
                             or_group: Some(group_id),
+                            or_branch: Some(branch_idx),
                         });
                     }
                 }
@@ -1565,6 +1567,7 @@ fn build_problems(
                             is_approximation: approximated,
                             location,
                             or_group: None,
+                        or_branch: None,
                         });
                     }
                 }
