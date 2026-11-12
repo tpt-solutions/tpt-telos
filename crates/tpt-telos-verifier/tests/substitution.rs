@@ -91,6 +91,7 @@ fn no_substitution_when_eq_has_no_unit_coefficient() {
         Linear {
             terms: vec![("x".to_string(), 2)],
             constant: -4,
+            products: vec![],
         },
         Relation::Eq,
     );
@@ -109,6 +110,7 @@ fn substitute_negative_coefficient() {
         Linear {
             terms: vec![("x".to_string(), -1), ("y".to_string(), 1)],
             constant: 0,
+            products: vec![],
         },
         Relation::Eq,
     );

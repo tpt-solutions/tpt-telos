@@ -1014,6 +1014,8 @@ fn run_verify(file: &str, solver: &str, json: bool, watch: bool) -> Result<bool,
                     eprintln!("warning: Z3 not found at runtime; falling back to Fourier-Motzkin");
                 } else {
                     tpt_telos_verifier::set_solver_backend(tpt_telos_verifier::SolverBackend::Z3);
+                    // Z3 can check monomials, so lower products exactly (see `tpt-telos-ir`).
+                    tpt_telos_ir::set_exact_nonlinear(true);
                 }
             }
             #[cfg(not(feature = "z3"))]

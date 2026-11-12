@@ -120,7 +120,16 @@ fn merge_keys(a: &HashMap<String, i128>, b: &HashMap<String, i128>) -> Vec<Strin
 /// let ge0 = Constraint(Linear::var("x"), Relation::Ge);
 /// assert!(!unsat(&[ge0]));
 /// ```
+/// True if any constraint contains a monomial (see `Linear::products`). The Fourier-Motzkin
+/// functions in this module refuse such constraints and fail closed.
+pub fn has_monomials(cs: &[Constraint]) -> bool {
+    cs.iter().any(|c| c.0.has_products())
+}
+
 pub fn unsat(cs: &[Constraint]) -> bool {
+    if has_monomials(cs) {
+        return false; // not proven: Fourier-Motzkin cannot use monomials
+    }
     unsat_checked(cs).unwrap_or(false)
 }
 
@@ -240,6 +249,9 @@ pub fn equality_substitute(cs: &mut Vec<Constraint>) {
 }
 
 pub fn unsat_checked(cs: &[Constraint]) -> Option<bool> {
+    if has_monomials(cs) {
+        return None;
+    }
     // Apply equality substitution first to reduce the constraint set before FM
     // elimination. This makes proof chains explicit and improves verification of
     // derived-value patterns (ledgers, rate-limiters, quota trackers).
@@ -343,6 +355,9 @@ pub fn negate(concl: &Constraint) -> Vec<Vec<Constraint>> {
 /// assert!(!entails(&[x_ge0], &x_ge3));
 /// ```
 pub fn entails(premises: &[Constraint], concl: &Constraint) -> bool {
+    if has_monomials(premises) || has_monomials(std::slice::from_ref(concl)) {
+        return false; // fail closed: nonlinear obligations are not proven by this solver
+    }
     for branch in negate(concl) {
         let mut combined: Vec<Constraint> = premises.to_vec();
         combined.extend(branch);
@@ -460,6 +475,9 @@ fn eval(coeffs: &HashMap<String, i128>, model: &Model) -> i128 {
 /// assert!(model(&[ge1, le0]).is_none());
 /// ```
 pub fn model(cs: &[Constraint]) -> Option<Model> {
+    if has_monomials(cs) {
+        return None;
+    }
     let ineqs = to_inequalities(cs);
     solve_model(ineqs)
 }
@@ -607,6 +625,9 @@ fn solve_model(ineqs: Vec<LinIneq>) -> Option<Model> {
 /// assert!(counterexample(&[x_ge10], &x_ge5).is_none());
 /// ```
 pub fn counterexample(premises: &[Constraint], concl: &Constraint) -> Option<Model> {
+    if has_monomials(premises) || has_monomials(std::slice::from_ref(concl)) {
+        return None;
+    }
     for branch in negate(concl) {
         let mut cs = premises.to_vec();
         cs.extend(branch);
@@ -662,6 +683,7 @@ mod model_tests {
             Linear {
                 terms: terms.iter().map(|(v, c)| (v.to_string(), *c)).collect(),
                 constant: k,
+                products: vec![],
             },
             rel,
         )
@@ -717,6 +739,7 @@ mod tests {
             Linear {
                 terms: terms.iter().map(|(v, c)| (v.to_string(), *c)).collect(),
                 constant: k,
+                products: vec![],
             },
             rel,
         )
@@ -780,6 +803,7 @@ mod extended_tests {
             Linear {
                 terms: terms.iter().map(|(v, c)| (v.to_string(), *c)).collect(),
                 constant: k,
+                products: vec![],
             },
             rel,
         )
@@ -1000,6 +1024,7 @@ mod proptests {
                 Linear {
                     terms: result_terms,
                     constant,
+                    products: vec![],
                 }
             })
         })
@@ -1066,7 +1091,7 @@ mod proptests {
         #[test]
         fn negation_roundtrip(rel in arb_relation(), coeff in -5i64..5i64, k in -5i64..5i64) {
             let concl = Constraint(
-                Linear { terms: vec![("x".to_string(), coeff)], constant: k },
+                Linear { terms: vec![("x".to_string(), coeff)], constant: k, products: vec![] },
                 rel,
             );
             let empty: Vec<Constraint> = vec![];
