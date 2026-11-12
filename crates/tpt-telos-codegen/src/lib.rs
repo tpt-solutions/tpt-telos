@@ -419,6 +419,10 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
                     out.push_str(";\n");
                 }
             }
+            Stmt::Expr(e) => {
+                out.push_str(&format!("    {};
+", render_expr(e)));
+            }
             Stmt::Assign(a) => {
                 let value = render_expr(&a.value);
                 if scalar_out.as_deref() == Some(target_var(&a.target)) {
@@ -491,6 +495,7 @@ fn stmt_contains_try(s: &Stmt) -> bool {
     match s {
         Stmt::MutateState(assigns) => assigns.iter().any(|a| expr_contains_try(&a.value)),
         Stmt::Assign(a) => expr_contains_try(&a.value),
+        Stmt::Expr(e) => expr_contains_try(e),
         Stmt::Let(lb) => expr_contains_try(&lb.value),
         Stmt::If(is) => {
             expr_contains_try(&is.condition)
@@ -798,6 +803,7 @@ fn render_stmt_indented(s: &Stmt, out: &mut String, indent: usize) {
             Some(expr) => format!("return {};", render_expr(expr)),
             None => "return;".to_string(),
         },
+        Stmt::Expr(e) => format!("{};", render_expr(e)),
     };
     out.push_str(&format!("{}{}\n", prefix, rendered));
 }

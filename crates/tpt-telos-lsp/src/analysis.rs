@@ -746,6 +746,7 @@ fn render_stmt(s: &Stmt) -> String {
                 fmt_indent(&arms.join("\n"))
             )
         }
+        Stmt::Expr(e) => format!("{};", pretty_expr(e)),
         Stmt::Return(e) => match e {
             Some(expr) => format!("return {};", pretty_expr(expr)),
             None => "return;".to_string(),

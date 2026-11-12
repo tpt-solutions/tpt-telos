@@ -222,6 +222,11 @@ pub(crate) fn render_func_named(
                     out.push('\n');
                 }
             }
+            Stmt::Expr(e) => {
+                out.push('\t');
+                out.push_str(&render_expr(e));
+                out.push('\n');
+            }
             Stmt::Assign(a) => {
                 if analysis.scalar_out.as_deref() == Some(target_var(&a.target)) {
                     out.push_str(&format!(
@@ -440,6 +445,9 @@ fn render_go_stmt_indented(s: &Stmt, out: &mut String, indent: usize) {
             for a in assigns {
                 out.push_str(&format!("{}{}\n", prefix, render_assign(a)));
             }
+        }
+        Stmt::Expr(e) => {
+            out.push_str(&format!("{}{}\n", prefix, render_expr(e)));
         }
         Stmt::Assign(a) => {
             out.push_str(&format!("{}{}\n", prefix, render_assign(a)));

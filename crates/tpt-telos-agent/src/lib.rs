@@ -400,6 +400,7 @@ fn render_stmt(s: &Stmt) -> String {
             out.push('}');
             out
         }
+        Stmt::Expr(e) => format!("{};", pretty(e)),
         Stmt::Return(e) => match e {
             Some(expr) => format!("return {};", pretty(expr)),
             None => "return;".to_string(),

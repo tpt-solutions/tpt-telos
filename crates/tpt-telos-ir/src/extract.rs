@@ -802,6 +802,7 @@ struct BodyBranch {
 fn collect_body_referenced_fields(body: &[Stmt], out: &mut HashSet<(String, String)>) {
     for stmt in body {
         match stmt {
+            Stmt::Expr(e) => collect_fields(e, out),
             Stmt::MutateState(assigns) => {
                 for a in assigns {
                     collect_fields(&a.value, out);
@@ -827,7 +828,8 @@ fn collect_body_referenced_fields(body: &[Stmt], out: &mut HashSet<(String, Stri
                     collect_body_referenced_fields(&arm.body, out);
                 }
             }
-            Stmt::Let(_) | Stmt::Return(_) => {}
+            // A bare expression has no effect on state.
+            Stmt::Let(_) | Stmt::Return(_) | Stmt::Expr(_) => {}
         }
     }
 }
@@ -855,6 +857,7 @@ fn process_body_stmts(
                         Expr::Field { base, field } => Some((base.clone(), field.clone())),
                         _ => None,
                     };
+                    check_not_reassigned(&branches, &field, a)?;
                     for b in &mut branches {
                         b.mutations.push(c.clone());
                         if let Some(f) = &field {
@@ -869,6 +872,7 @@ fn process_body_stmts(
                     Expr::Field { base, field } => Some((base.clone(), field.clone())),
                     _ => None,
                 };
+                check_not_reassigned(&branches, &field, a)?;
                 for b in &mut branches {
                     b.mutations.push(c.clone());
                     if let Some(f) = &field {
@@ -951,10 +955,36 @@ fn process_body_stmts(
                     ));
                 }
             }
-            Stmt::Let(_) | Stmt::Return(_) => {}
+            // A bare expression has no effect on state.
+            Stmt::Let(_) | Stmt::Return(_) | Stmt::Expr(_) => {}
         }
     }
     Ok(branches)
+}
+
+/// Reject a field that is assigned more than once on one path.
+///
+/// Each assignment is lowered to `post == value` on the same post-state variable. Two
+/// assignments to one field therefore give two equations on that variable. When their values
+/// differ, the premises are unsatisfiable, and every conclusion then passes vacuously. Telos
+/// does not define a sequential meaning for a second assignment, so the sound behaviour is to
+/// refuse the program rather than verify it.
+fn check_not_reassigned(
+    branches: &[BodyBranch],
+    field: &Option<(String, String)>,
+    a: &Assign,
+) -> Result<(), String> {
+    if let Some(f) = field {
+        if branches.iter().any(|b| b.assigned.contains(f)) {
+            return Err(format!(
+                "field `{}.{}` is assigned more than once on one path (`{}`); each field may be                  assigned at most once per path, because a repeated assignment is not verified                  soundly",
+                f.0,
+                f.1,
+                pretty(&a.target)
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn assign_constraint(

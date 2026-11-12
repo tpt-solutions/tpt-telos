@@ -318,6 +318,9 @@ pub enum Stmt {
     Match(MatchStmt),
     /// `return [expr];`
     Return(Option<Expr>),
+    /// A bare expression statement, such as a call or a trailing value. It has no effect on state.
+    /// (The parser previously turned these into an assignment of `0`, which was unsound.)
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -383,6 +383,7 @@ fn pretty_stmt(s: &Stmt) -> String {
                 .join(",\n");
             format!("match {} {{\n{}\n}}", pretty(&m.scrutinee), arms)
         }
+        Stmt::Expr(e) => format!("{};", pretty(e)),
         Stmt::Return(e) => match e {
             Some(e) => format!("return {};", pretty(e)),
             None => "return;".to_string(),

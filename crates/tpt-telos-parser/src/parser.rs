@@ -563,15 +563,11 @@ impl Parser {
                         }))
                     }
                     _ => {
-                        // Expression statement (e.g., function call)
+                        // Bare expression statement (a call, or a trailing value).
                         if *self.peek() == Token::Semicolon {
                             self.advance();
                         }
-                        Ok(Stmt::Assign(Assign {
-                            target: expr,
-                            op: AssignOp::Set,
-                            value: Expr::Int(0), // placeholder
-                        }))
+                        Ok(Stmt::Expr(expr))
                     }
                 }
             }
