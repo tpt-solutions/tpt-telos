@@ -22,7 +22,8 @@ use std::collections::HashMap;
 use tpt_telos_parser::ast::*;
 
 use crate::{
-    analyze_func, collect_types, render_expr_doc, render_params_sig, InputParam, TypeFields,
+    analyze_func, collect_types, render_expr_doc, render_params_sig, tail_return_expr, InputParam,
+    TypeFields,
 };
 
 /// Capitalise the first character (ASCII) so a telos field/func name becomes an
@@ -205,7 +206,8 @@ pub(crate) fn render_func_named(
         }
     }
 
-    let ret = if analysis.scalar_out.is_some() {
+    let tail = tail_return_expr(f, stmts, &analysis.scalar_out);
+    let ret = if analysis.scalar_out.is_some() || tail.is_some() {
         " int64"
     } else {
         ""
@@ -223,9 +225,13 @@ pub(crate) fn render_func_named(
                 }
             }
             Stmt::Expr(e) => {
-                out.push('\t');
-                out.push_str(&render_expr(e));
-                out.push('\n');
+                if tail.is_some() && std::ptr::eq(stmt, stmts.last().unwrap()) {
+                    out.push_str(&format!("\treturn {}\n", render_expr(e)));
+                } else {
+                    out.push('\t');
+                    out.push_str(&render_expr(e));
+                    out.push('\n');
+                }
             }
             Stmt::Assign(a) => {
                 if analysis.scalar_out.as_deref() == Some(target_var(&a.target)) {

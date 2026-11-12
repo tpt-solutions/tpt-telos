@@ -61,6 +61,22 @@ pub(crate) struct FuncAnalysis {
     pub scalar_out: Option<String>,
 }
 
+/// The trailing bare expression of a function that returns an `i64` (and has no scalar `out`
+/// variable). That expression is the function's return value. `None` for every other function.
+pub(crate) fn tail_return_expr<'a>(
+    f: &Func,
+    stmts: &'a [Stmt],
+    scalar_out: &Option<String>,
+) -> Option<&'a Expr> {
+    if scalar_out.is_some() {
+        return None;
+    }
+    match (f.return_ty.as_ref().map(|t| t.name()), stmts.last()) {
+        (Some("i64"), Some(Stmt::Expr(e))) => Some(e),
+        _ => None,
+    }
+}
+
 /// Analyse a function's parameters and body once, deriving the mutation set and
 /// scalar-return output so every backend lowers the same signature.
 pub(crate) fn analyze_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> FuncAnalysis {
@@ -390,13 +406,14 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
     }
 
     let uses_try = stmts.iter().any(stmt_contains_try);
+    let tail = tail_return_expr(f, stmts, &scalar_out).filter(|_| !uses_try);
     let ret = if uses_try {
         if scalar_out.is_some() {
             " -> Result<i64, String>".to_string()
         } else {
             " -> Result<(), String>".to_string()
         }
-    } else if scalar_out.is_some() {
+    } else if scalar_out.is_some() || tail.is_some() {
         " -> i64".to_string()
     } else {
         String::new()
@@ -420,8 +437,13 @@ pub(crate) fn render_func(f: &Func, stmts: &[Stmt], types: &TypeFields) -> Strin
                 }
             }
             Stmt::Expr(e) => {
-                out.push_str(&format!("    {};
+                if tail.is_some() && std::ptr::eq(stmt, stmts.last().unwrap()) {
+                    out.push_str(&format!("    return {};
 ", render_expr(e)));
+                } else {
+                    out.push_str(&format!("    {};
+", render_expr(e)));
+                }
             }
             Stmt::Assign(a) => {
                 let value = render_expr(&a.value);
@@ -1150,6 +1172,20 @@ mod tests {
         assert!(rust.contains("pub struct Counter"));
         assert!(rust.contains("pub fn satisfies_invariants"));
         assert!(rust.contains("pub fn f"));
+    }
+
+    #[test]
+    fn trailing_value_of_an_i64_function_is_returned() {
+        // Backlog item 13: the trailing expression is the return value, so the signature
+        // gets `-> i64` and the body ends in `return ...;`.
+        let src = "module M { invariant Bucket { tokens >= 0 }             func consume(mut b: Bucket, cost: i64) -> i64 requires cost <= b.tokens {             mutate state { b.tokens = old(b.tokens) - cost; } b.tokens } }";
+        let modules = tpt_telos_parser::parse(src).unwrap();
+        let rust = generate_program(&modules, &[]);
+        assert!(rust.contains("pub fn consume(b: &mut Bucket, cost: i64) -> i64"), "{rust}");
+        assert!(rust.contains("return b.tokens;"), "{rust}");
+        assert!(!rust.contains("
+    b.tokens;
+"), "bare trailing statement remains: {rust}");
     }
 
     #[test]
