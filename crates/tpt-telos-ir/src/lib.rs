@@ -3,5 +3,5 @@
 pub mod extract;
 pub mod ir;
 
-pub use extract::extract;
+pub use extract::{exact_nonlinear, extract, set_exact_nonlinear};
 pub use ir::*;

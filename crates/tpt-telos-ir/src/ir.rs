@@ -46,6 +46,11 @@ pub struct Linear {
     /// `(variable, coefficient)` pairs.
     pub terms: Vec<(String, i64)>,
     pub constant: i64,
+    /// Monomials: each entry `(a, b, k)` contributes `k * a * b`, where `a` and `b` are
+    /// themselves linear. Empty for linear constraints. Only produced in exact-nonlinear mode
+    /// (`set_exact_nonlinear(true)`, used by `telos verify --solver z3`). The Fourier-Motzkin
+    /// solver refuses constraints that contain monomials.
+    pub products: Vec<(Linear, Linear, i64)>,
 }
 
 /// A linear arithmetic constraint: `linear_expression relation 0`.
@@ -81,6 +86,7 @@ impl Linear {
         Linear {
             terms: vec![(name.to_string(), 1)],
             constant: 0,
+            products: vec![],
         }
     }
 
@@ -99,6 +105,7 @@ impl Linear {
         Linear {
             terms: vec![],
             constant: c,
+            products: vec![],
         }
     }
 
@@ -128,9 +135,12 @@ impl Linear {
             }
         }
         terms.retain(|(_, c)| *c != 0);
+        let mut products = self.products.clone();
+        products.extend(other.products.iter().cloned());
         Linear {
             terms,
             constant: self.constant + other.constant,
+            products,
         }
     }
 
@@ -146,10 +156,7 @@ impl Linear {
     /// assert_eq!(expr.constant, -5);
     /// ```
     pub fn sub(&self, other: &Linear) -> Linear {
-        let neg = Linear {
-            terms: other.terms.iter().map(|(v, c)| (v.clone(), -*c)).collect(),
-            constant: -other.constant,
-        };
+        let neg = other.neg();
         self.add(&neg)
     }
 
@@ -168,6 +175,7 @@ impl Linear {
         Linear {
             terms: self.terms.iter().map(|(v, c)| (v.clone(), -*c)).collect(),
             constant: -self.constant,
+            products: self.products.iter().map(|(a, b, k)| (a.clone(), b.clone(), -*k)).collect(),
         }
     }
 
@@ -186,7 +194,22 @@ impl Linear {
         Linear {
             terms: self.terms.iter().map(|(v, c)| (v.clone(), c * k)).collect(),
             constant: self.constant * k,
+            products: self.products.iter().map(|(a, b, c)| (a.clone(), b.clone(), c * k)).collect(),
         }
+    }
+
+    /// The monomial `a * b`, as a linear expression with one product term.
+    pub fn product(a: &Linear, b: &Linear) -> Linear {
+        Linear {
+            terms: vec![],
+            constant: 0,
+            products: vec![(a.clone(), b.clone(), 1)],
+        }
+    }
+
+    /// True if this expression contains a monomial anywhere.
+    pub fn has_products(&self) -> bool {
+        !self.products.is_empty()
     }
 }
 

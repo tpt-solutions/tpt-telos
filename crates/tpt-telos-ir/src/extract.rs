@@ -21,6 +21,21 @@ type VarBounds = HashMap<String, (Option<i64>, Option<i64>)>;
 
 type Naming = dyn Fn(&str, &str) -> String;
 
+/// When true, a product of two non-constant expressions is lowered to an exact monomial
+/// ([`Linear::product`]) instead of an interval approximation or an error. Set by
+/// `telos verify --solver z3`. The default (false) keeps the approximation behaviour.
+static EXACT_NONLINEAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable or disable exact monomial lowering. See [`EXACT_NONLINEAR`].
+pub fn set_exact_nonlinear(on: bool) {
+    EXACT_NONLINEAR.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether exact monomial lowering is enabled.
+pub fn exact_nonlinear() -> bool {
+    EXACT_NONLINEAR.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 fn pre_field(base: &str, field: &str) -> String {
     format!("{}.{}", base, field)
 }
@@ -79,6 +94,8 @@ fn linearize(
                         Ok(l.scale(k))
                     } else if let Some(k) = as_int(lhs) {
                         Ok(r.scale(k))
+                    } else if exact_nonlinear() {
+                        Ok(Linear::product(&l, &r))
                     } else {
                         Err("non-linear multiplication is not supported in constraints".into())
                     }
@@ -125,7 +142,8 @@ fn linearize(
 fn collect_var_bounds(premises: &[Constraint]) -> VarBounds {
     let mut bounds: VarBounds = HashMap::new();
     for Constraint(lin, rel) in premises {
-        if lin.terms.len() != 1 {
+        // A constraint with a monomial does not isolate a bound on its variable.
+        if lin.terms.len() != 1 || lin.has_products() {
             continue;
         }
         let (var, coeff) = &lin.terms[0];
@@ -249,6 +267,8 @@ fn linearize_bounded(
                         Ok(l.scale(k))
                     } else if let Some(k) = as_int(lhs) {
                         Ok(r.scale(k))
+                    } else if exact_nonlinear() {
+                        Ok(Linear::product(&l, &r))
                     } else {
                         // Try interval bounding: replace a * b with a constant
                         // derived from the product of their bounds. `prefer_min_corner`
@@ -427,9 +447,17 @@ fn scale_exact(l: &Linear, k: i64) -> Result<Linear, String> {
         }
         terms.push((v.clone(), c / k));
     }
+    let mut products = Vec::new();
+    for (a, b, c) in &l.products {
+        if c % k != 0 {
+            return Err("non-integer division in constraint".into());
+        }
+        products.push((a.clone(), b.clone(), c / k));
+    }
     Ok(Linear {
         terms,
         constant: l.constant / k,
+        products,
     })
 }
 
